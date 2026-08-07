@@ -1,0 +1,3 @@
+-- Le 12 categorie e le 141 sottocategorie ufficiali sono importate dalla
+-- migration 0003_official_exercise_catalog.sql.
+-- Nessun esercizio aggiuntivo viene creato da questo seed.
