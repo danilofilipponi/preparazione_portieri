@@ -25,7 +25,11 @@ AI o notifiche.
    i record GK-PRA-001–018 e aggiungere i due passaggi dello svolgimento.
 8. Eseguire `supabase/migrations/0007_sync_gk_pra_001_036.sql` per sincronizzare
    i record GK-PRA-001–036 e supportare fino a cinque passaggi.
-9. Avviare con `npm run dev`.
+9. Eseguire `supabase/migrations/0008_clean_exercise_subcategories.sql` per
+   rimuovere i duplicati e separare i nomi tecnici dalla fase metodologica.
+10. Eseguire `supabase/migrations/0009_sync_gk_pra_001_040.sql` per sincronizzare
+    GK-PRA-001–040, aggiungere i quattro nuovi esercizi e il sesto passaggio.
+11. Avviare con `npm run dev`.
 
 Senza variabili Supabase l'interfaccia si apre in modalità demo con dati di
 esempio. La struttura dettagliata e la spiegazione delle tabelle sono in
