@@ -2,14 +2,27 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
-import type { AppSettings, CatalogPhase, Exercise, ExerciseCategory, ExercisePhysicalObjective, ExerciseSubcategory, PhysicalObjective, Training } from "../lib/types";
+import type { AppSettings, CalendarDay, CalendarException, CatalogPhase, EditableExerciseSelection, EditableGeneratedSession, Exercise, ExerciseCategory, ExerciseDifficulty, ExercisePhysicalObjective, ExerciseSubcategory, GenerationMode, Goalkeeper, PhysicalAssessmentDimension, PhysicalObjective, PriorityRankingItem, ScoredExerciseCandidate, Season, SeasonMatch, SeasonPhaseConfig, SeasonRecallPeriod, SeasonTrainingProfile, SessionBlock, SessionProfile, SessionQualityResult, Training, TrainingExerciseVariant } from "../lib/types";
 import { deleteExerciseImage, isAcceptedExerciseImage, parseExerciseImageName, uploadExerciseImage, type ExerciseImageKind } from "../lib/exercise-images";
 import { ExerciseCard } from "./components/exercise-card";
 import { BulkImageImportModal, ExerciseImageField, type BulkImageSummary } from "./components/exercise-image-tools";
 import { PhysicalObjectivesPage } from "./components/physical-objectives";
 import { ExercisePhysicalObjectivesEditor, type PhysicalMappingDraft } from "./components/exercise-physical-objectives-editor";
+import { SeasonSettings, type SeasonConfiguration } from "./components/season-settings";
+import { SeasonAgenda } from "./components/season-agenda";
+import { CalendarDayModal } from "./components/calendar-day-modal";
+import { GoalkeepersPage, type GoalkeeperAssessmentDraft, type GoalkeeperDraft } from "./components/goalkeepers-page";
+import { SessionPlanner } from "./components/session-planner";
+import { buildIndividualVariantSuggestions, buildSessionBlocks, buildSessionProfile, calculateSessionQuality, getReplacementCandidates, makeEditableSession, rankPhysicalPriorities, rankTechnicalPriorities, regenerateBlock, regenerateSession, scoreManualExercise, selectSessionExercises } from "../lib/session-planner/index";
+import { ReplacementAlternativesModal } from "./components/replacement-alternatives-modal";
+import { ManualExercisePicker } from "./components/manual-exercise-picker";
+import { IndividualVariantsEditor } from "./components/individual-variants-editor";
+import { SessionExerciseCard } from "./components/session-exercise-card";
+import { SessionFieldMode } from "./components/session-field-mode";
+import { SessionOverviewHeader } from "./components/session-overview-header";
+import { groupSessionExercises, type SessionDisplayExercise } from "../lib/session-visualization";
 
-type Section = "archive" | "builder" | "agenda" | "physical";
+type Section = "archive" | "builder" | "agenda" | "physical" | "goalkeepers";
 type ExerciseDraft = Omit<Exercise, "id" | "category" | "subcategory" | "physical_mappings">;
 
 const emptyExercise: ExerciseDraft = {
@@ -20,8 +33,13 @@ const emptyExercise: ExerciseDraft = {
   coaching_points: "", errori_comuni: "", schema_step_1: null, schema_step_2: null,
   schema_step_3: null, schema_step_4: null, schema_step_5: null,
   schema_step_6: null,
+  scenario_gara: null, numero_azioni: null,
   schema_url: null, foto_url: null, attivo: true,
 };
+
+const catalogPhases: CatalogPhase[] = ["Analitico", "Disturbo", "Situazionale", "Integrato guidato", "Integrato variabile", "Situazionale complesso", "Scenario aperto"];
+const exerciseIntensities: Exercise["intensita"][] = ["Bassa", "Bassa-Media", "Media", "Media-Alta", "Alta"];
+const exerciseDifficulties: ExerciseDifficulty[] = [1, 2, 3, 4, 5];
 
 const fallbackObjectives = ["Tecnica di presa", "Rapidità", "Dominio area", "Distribuzione", "Tecnica di tuffo", "1 contro 1"];
 const dayNames = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
@@ -37,6 +55,13 @@ function dateKey(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function readableError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") return error.message;
+  if (typeof error === "string") return error;
+  return "errore sconosciuto";
 }
 
 function cleanSubcategoryLabel(value: string) {
@@ -74,11 +99,9 @@ function normalizeExercise(record: Record<string, unknown>): Exercise {
       return { ...mapping, peso: Number(mapping.peso), physical_objective: relatedObjective } as ExercisePhysicalObjective;
     }).filter(mapping => mapping.attivo && mapping.physical_objective).sort((a, b) => b.peso - a.peso)
     : [];
-  const fase: CatalogPhase = record.fase === "Disturbo" || record.fase === "Situazionale"
-    ? record.fase
-    : relatedPhase === "Disturbo" || relatedPhase === "Situazionale"
-      ? relatedPhase
-      : "Analitico";
+  const rawPhase = String(record.fase ?? relatedPhase ?? "Analitico") as CatalogPhase;
+  const fase: CatalogPhase = catalogPhases.includes(rawPhase) ? rawPhase : "Analitico";
+  const rawIntensity = String(record.intensita ?? "Media") as Exercise["intensita"];
   return {
     ...record,
     categoria: String(record.categoria ?? category?.nome ?? record.legacy_category ?? "Categoria da definire"),
@@ -86,7 +109,8 @@ function normalizeExercise(record: Record<string, unknown>): Exercise {
     fase,
     portieri_min: Number(record.portieri_min ?? record.numero_portieri_min ?? 1),
     portieri_max: Number(record.portieri_max ?? record.numero_portieri_max ?? 1),
-    difficolta: ([1, 2, 3, 4].includes(Number(record.difficolta)) ? Number(record.difficolta) : 1) as 1 | 2 | 3 | 4,
+    intensita: exerciseIntensities.includes(rawIntensity) ? rawIntensity : "Media",
+    difficolta: (exerciseDifficulties.includes(Number(record.difficolta) as ExerciseDifficulty) ? Number(record.difficolta) : 1) as ExerciseDifficulty,
     coaching_points: String(record.coaching_points ?? "Da completare."),
     errori_comuni: String(record.errori_comuni ?? "Da completare."),
     schema_step_1: record.schema_step_1 ? String(record.schema_step_1) : null,
@@ -95,6 +119,8 @@ function normalizeExercise(record: Record<string, unknown>): Exercise {
     schema_step_4: record.schema_step_4 ? String(record.schema_step_4) : null,
     schema_step_5: record.schema_step_5 ? String(record.schema_step_5) : null,
     schema_step_6: record.schema_step_6 ? String(record.schema_step_6) : null,
+    scenario_gara: record.scenario_gara ? String(record.scenario_gara) : null,
+    numero_azioni: record.numero_azioni ? String(record.numero_azioni) : null,
     schema_url: (record.schema_url ?? record.immagine_url ?? null) as string | null,
     foto_url: (record.foto_url ?? null) as string | null,
     category: category ?? undefined,
@@ -109,18 +135,45 @@ export function KeeperApp() {
   const [exerciseCategories, setExerciseCategories] = useState<ExerciseCategory[]>([]);
   const [exerciseSubcategories, setExerciseSubcategories] = useState<ExerciseSubcategory[]>([]);
   const [physicalObjectives, setPhysicalObjectives] = useState<PhysicalObjective[]>([]);
+  const [physicalAssessmentDimensions, setPhysicalAssessmentDimensions] = useState<PhysicalAssessmentDimension[]>([]);
+  const [goalkeepers, setGoalkeepers] = useState<Goalkeeper[]>([]);
   const [trainings, setTrainings] = useState<Training[]>([]);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
+  const [season, setSeason] = useState<Season | null>(null);
+  const [seasonPhases, setSeasonPhases] = useState<SeasonPhaseConfig[]>([]);
+  const [seasonRecall, setSeasonRecall] = useState<SeasonRecallPeriod | null>(null);
+  const [seasonProfiles, setSeasonProfiles] = useState<SeasonTrainingProfile[]>([]);
+  const [seasonMatches, setSeasonMatches] = useState<SeasonMatch[]>([]);
+  const [calendarExceptions, setCalendarExceptions] = useState<CalendarException[]>([]);
+  const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
+  const [seasonBusy, setSeasonBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<number | "all">("all");
   const [subcategoryFilter, setSubcategoryFilter] = useState<string | "all">("all");
   const [phaseFilter, setPhaseFilter] = useState<CatalogPhase | "all">("all");
   const [intensityFilter, setIntensityFilter] = useState<Exercise["intensita"] | "all">("all");
-  const [difficultyFilter, setDifficultyFilter] = useState<1 | 2 | 3 | 4 | "all">("all");
+  const [difficultyFilter, setDifficultyFilter] = useState<ExerciseDifficulty | "all">("all");
   const [physicalObjectiveFilter, setPhysicalObjectiveFilter] = useState<string | "all">("all");
   const [selectedObjectives, setSelectedObjectives] = useState<string[]>([]);
   const [selectedPhysicalObjectiveId, setSelectedPhysicalObjectiveId] = useState("");
   const [session, setSession] = useState<Exercise[]>([]);
+  const [generationMode, setGenerationMode] = useState<GenerationMode>("Automatico");
+  const [selectedGoalkeeperIds, setSelectedGoalkeeperIds] = useState<string[]>([]);
+  const [sessionProfile, setSessionProfile] = useState<SessionProfile | null>(null);
+  const [technicalRanking, setTechnicalRanking] = useState<PriorityRankingItem[]>([]);
+  const [physicalRanking, setPhysicalRanking] = useState<PriorityRankingItem[]>([]);
+  const [technicalFocusId, setTechnicalFocusId] = useState<number | null>(null);
+  const [technicalSecondaryFocusId, setTechnicalSecondaryFocusId] = useState<number | null>(null);
+  const [physicalFocusId, setPhysicalFocusId] = useState<string | null>(null);
+  const [sessionBlocks, setSessionBlocks] = useState<SessionBlock[]>([]);
+  const [generatedExercises, setGeneratedExercises] = useState<EditableGeneratedSession | null>(null);
+  const [sessionQuality, setSessionQuality] = useState<SessionQualityResult | null>(null);
+  const [sessionConfirmed, setSessionConfirmed] = useState(false);
+  const [regenerationCount, setRegenerationCount] = useState(0);
+  const [replacementTarget, setReplacementTarget] = useState<EditableExerciseSelection | null>(null);
+  const [replacementCandidates, setReplacementCandidates] = useState<ScoredExerciseCandidate[]>([]);
+  const [manualPickerBlock, setManualPickerBlock] = useState<number | null>(null);
+  const [variantTarget, setVariantTarget] = useState<EditableExerciseSelection | null>(null);
   const [duration, setDuration] = useState(60);
   const [keepers, setKeepers] = useState(3);
   const [date, setDate] = useState(dateKey(new Date()));
@@ -131,8 +184,11 @@ export function KeeperApp() {
   const [openTraining, setOpenTraining] = useState<Training | null>(null);
   const [editingTrainingId, setEditingTrainingId] = useState<string | null>(null);
   const [openExercise, setOpenExercise] = useState<Exercise | null>(null);
+  const [sessionExerciseDetail, setSessionExerciseDetail] = useState<{ exercise: Exercise; plannedDuration: number; variants: TrainingExerciseVariant[] } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [bulkImageOpen, setBulkImageOpen] = useState(false);
+  const [seasonSettingsOpen, setSeasonSettingsOpen] = useState(false);
+  const [openCalendarDay, setOpenCalendarDay] = useState<CalendarDay | null>(null);
 
   const loadExercises = useCallback(async () => {
     if (!supabase) return;
@@ -171,11 +227,37 @@ export function KeeperApp() {
     if (!error) setPhysicalObjectives((data ?? []) as PhysicalObjective[]);
   }, []);
 
+  const loadGoalkeepers = useCallback(async () => {
+    if (!supabase) return;
+    const [goalkeeperResult, dimensionResult] = await Promise.all([
+      supabase.from("goalkeepers").select("*, assessments:goalkeeper_assessments(id,goalkeeper_id,data_valutazione,note_generali,created_at,items:goalkeeper_assessment_items(id,assessment_id,tipo,exercise_category_id,physical_dimension_id,score,nota,category:exercise_categories(id,nome,attivo),physical_dimension:physical_assessment_dimensions(id,codice,nome,descrizione,ordine,attivo,objective_mappings:physical_assessment_dimension_objectives(peso,physical_objective:physical_objectives(*)))))").order("cognome").order("nome"),
+      supabase.from("physical_assessment_dimensions").select("*, objective_mappings:physical_assessment_dimension_objectives(peso,physical_objective:physical_objectives(*))").eq("attivo", true).order("ordine"),
+    ]);
+    if (goalkeeperResult.error || dimensionResult.error) {
+      setGoalkeepers([]); setPhysicalAssessmentDimensions([]);
+      return;
+    }
+    const normalized = (goalkeeperResult.data ?? []).map(raw => {
+      const goalkeeper = raw as unknown as Goalkeeper;
+      const assessments = [...(goalkeeper.assessments ?? [])].map(assessment => ({
+        ...assessment,
+        items: (assessment.items ?? []).map(item => ({
+          ...item, score: Number(item.score),
+          category: Array.isArray(item.category) ? item.category[0] ?? null : item.category ?? null,
+          physical_dimension: Array.isArray(item.physical_dimension) ? item.physical_dimension[0] ?? null : item.physical_dimension ?? null,
+        })),
+      })).sort((a, b) => b.data_valutazione.localeCompare(a.data_valutazione) || b.created_at.localeCompare(a.created_at));
+      return { ...goalkeeper, assessments };
+    });
+    setGoalkeepers(normalized);
+    setPhysicalAssessmentDimensions((dimensionResult.data ?? []) as unknown as PhysicalAssessmentDimension[]);
+  }, []);
+
   const loadTrainings = useCallback(async () => {
     if (!supabase) return;
     let { data, error } = await supabase
       .from("trainings")
-      .select("id, training_date, planned_duration_minutes, goalkeeper_count, notes, status, physical_objective_id, physical_objective:physical_objectives(*), training_objectives(objective), training_exercises(id, position, planned_duration_minutes, notes, exercise:exercises(*))")
+      .select("id, training_date, planned_duration_minutes, goalkeeper_count, notes, status, physical_objective_id, season_id, calendar_day_id, season_phase_id, session_number, session_type, technical_objective_primary, technical_objective_secondary, planned_load, match_day_offset, athletic_recall, generated_by_calendar, content_status, generation_mode, focus_source, technical_focus_primary_category_id, technical_focus_secondary_category_id, physical_focus_dimension_id, session_profile_code, session_profile_snapshot, technical_ranking_snapshot, physical_ranking_snapshot, generation_reason_snapshot,session_generation_snapshot,current_quality_snapshot,regeneration_count,revision_number,confirmed_at, physical_objective:physical_objectives(*), training_objectives(objective), training_exercises(id, position, planned_duration_minutes, notes,training_block_id,block_position,exercise_score,selection_snapshot,fallback_level,individual_variant_suggestion,locked,source,replacement_reason,replacement_note,variants:training_exercise_goalkeeper_variants(training_exercise_id,goalkeeper_id,tipo,variante_individuale,motivazione,priority_source,difficolta_delta,note), exercise:exercises(*)), training_goalkeepers(goalkeeper_id,individual_focus), training_blocks(id,training_id,tipo_blocco,ordine,durata_target,fase_metodologica_preferita,carico_target,technical_category_id,physical_dimension_id,notes,transition_minutes,regeneration_count)")
       .order("training_date");
     if (error) {
       const legacyResult = await supabase
@@ -193,8 +275,11 @@ export function KeeperApp() {
         physical_objective: "physical_objective" in training ? (Array.isArray(training.physical_objective) ? training.physical_objective[0] ?? null : training.physical_objective ?? null) : null,
         training_exercises: [...(training.training_exercises ?? [])].sort((a, b) => a.position - b.position).map(item => ({
           ...item,
+          exercise_score: "exercise_score" in item && item.exercise_score !== null ? Number(item.exercise_score) : null,
           exercise: item.exercise ? normalizeExercise(item.exercise as unknown as Record<string, unknown>) : item.exercise,
         })),
+        training_blocks: "training_blocks" in training && Array.isArray(training.training_blocks) ? [...training.training_blocks].sort((a, b) => Number(a.ordine) - Number(b.ordine)) : [],
+        training_goalkeepers: "training_goalkeepers" in training && Array.isArray(training.training_goalkeepers) ? training.training_goalkeepers : [],
       }));
       setTrainings(normalized as unknown as Training[]);
     }
@@ -210,15 +295,50 @@ export function KeeperApp() {
     setKeepers(next.default_goalkeeper_count);
   }, []);
 
+  const loadSeasonCalendar = useCallback(async () => {
+    if (!supabase) return;
+    const seasonResult = await supabase.from("seasons").select("*").eq("attiva", true).maybeSingle();
+    if (seasonResult.error) {
+      setSeason(null); setSeasonPhases([]); setSeasonRecall(null); setSeasonProfiles([]); setSeasonMatches([]); setCalendarExceptions([]); setCalendarDays([]);
+      return;
+    }
+    const activeSeason = seasonResult.data as Season | null;
+    setSeason(activeSeason);
+    if (!activeSeason) { setSeasonPhases([]); setSeasonRecall(null); setSeasonProfiles([]); setSeasonMatches([]); setCalendarExceptions([]); setCalendarDays([]); return; }
+    const [phaseResult, recallResult, profileResult, matchResult, exceptionResult, dayResult] = await Promise.all([
+      supabase.from("season_phases").select("*").eq("season_id", activeSeason.id).order("data_inizio"),
+      supabase.from("season_recall_periods").select("*").eq("season_id", activeSeason.id).eq("attivo", true).order("data_inizio").limit(1).maybeSingle(),
+      supabase.from("season_training_profiles").select("*").eq("season_id", activeSeason.id).eq("attivo", true).order("match_day_offset"),
+      supabase.from("matches").select("*").eq("season_id", activeSeason.id).eq("attiva", true).order("data"),
+      supabase.from("calendar_exceptions").select("*").eq("season_id", activeSeason.id).order("data"),
+      supabase.from("calendar_days").select("*, phase:season_phases(*), match:matches(*), profile:season_training_profiles(*)").eq("season_id", activeSeason.id).eq("attiva", true).order("data"),
+    ]);
+    setSeasonPhases((phaseResult.data ?? []) as SeasonPhaseConfig[]);
+    setSeasonRecall((recallResult.data ?? null) as SeasonRecallPeriod | null);
+    setSeasonProfiles((profileResult.data ?? []) as SeasonTrainingProfile[]);
+    setSeasonMatches((matchResult.data ?? []) as SeasonMatch[]);
+    setCalendarExceptions((exceptionResult.data ?? []) as CalendarException[]);
+    setCalendarDays((dayResult.data ?? []).map(raw => {
+      const item = raw as Record<string, unknown>;
+      const one = <T,>(value: unknown) => (Array.isArray(value) ? value[0] ?? null : value ?? null) as T | null;
+      return { ...item, phase: one<SeasonPhaseConfig>(item.phase), match: one<SeasonMatch>(item.match), profile: one<SeasonTrainingProfile>(item.profile) } as CalendarDay;
+    }));
+  }, []);
+
   useEffect(() => {
-    Promise.all([loadCatalog(), loadExercises(), loadPhysicalObjectives(), loadTrainings(), loadSettings()]).finally(() => setLoading(false));
-  }, [loadCatalog, loadExercises, loadPhysicalObjectives, loadTrainings, loadSettings]);
+    Promise.all([loadCatalog(), loadExercises(), loadPhysicalObjectives(), loadGoalkeepers(), loadTrainings(), loadSettings(), loadSeasonCalendar()]).finally(() => setLoading(false));
+  }, [loadCatalog, loadExercises, loadPhysicalObjectives, loadGoalkeepers, loadTrainings, loadSettings, loadSeasonCalendar]);
 
   useEffect(() => {
     if (!toast) return;
     const timeout = window.setTimeout(() => setToast(null), 3200);
     return () => window.clearTimeout(timeout);
   }, [toast]);
+
+  useEffect(() => {
+    if (!generatedExercises) { setSessionQuality(null); return; }
+    setSessionQuality(calculateSessionQuality({ selections: generatedExercises.selections, blocks: sessionBlocks, durationTarget: duration, goalkeeperCount: selectedGoalkeeperIds.length || keepers, technicalPrimaryId: technicalFocusId, technicalSecondaryId: technicalSecondaryFocusId }));
+  }, [generatedExercises, sessionBlocks, duration, selectedGoalkeeperIds, keepers, technicalFocusId, technicalSecondaryFocusId]);
 
   const availableSubcategories = useMemo(() => Array.from(new Set(exerciseSubcategories.filter(item => item.fase !== "Generale" && (categoryFilter === "all" || item.category_id === categoryFilter)).map(item => cleanSubcategoryLabel(item.nome)))).sort((a, b) => a.localeCompare(b, "it")), [exerciseSubcategories, categoryFilter]);
   const objectives = useMemo(() => Array.from(new Set([...fallbackObjectives, ...exercises.map(item => item.obiettivo)])).filter(Boolean), [exercises]);
@@ -263,14 +383,101 @@ export function KeeperApp() {
     setSession(items => items.map((item, itemIndex) => itemIndex === index ? alternatives[0] : item));
   }
 
+  function generateSessionPlan() {
+    const day = calendarDays.find(item => item.data === date);
+    const selectedGoalkeepers = goalkeepers.filter(item => selectedGoalkeeperIds.includes(item.id));
+    const preseason = day?.phase?.tipo === "Pre-campionato";
+    const profile = buildSessionProfile({ matchDayOffset: day?.match_day_offset ?? null, preseason, athleticRecall: day?.richiamo_atletico ?? false, plannedLoad: day?.carico_previsto ?? null, duration });
+    const categoryUsage: Record<number, number> = {}; const daysSinceUse: Record<number, number | null> = {};
+    for (const category of exerciseCategories) {
+      const usedDates = trainings.flatMap(training => [
+        ...training.training_exercises.filter(item => item.exercise?.category_id === category.id).map(() => training.training_date),
+        ...(training.training_blocks ?? []).filter(item => item.technical_category_id === category.id).map(() => training.training_date),
+      ]).sort().reverse();
+      categoryUsage[category.id] = usedDates.length;
+      daysSinceUse[category.id] = usedDates.length ? Math.max(0, Math.floor((new Date(`${date}T12:00:00`).getTime() - new Date(`${usedDates[0]}T12:00:00`).getTime()) / 86_400_000)) : null;
+    }
+    const weekMonday = dateKey(mondayOf(new Date(`${date}T12:00:00`)));
+    const weeklyPrimary = trainings.find(item => dateKey(mondayOf(new Date(`${item.training_date}T12:00:00`))) === weekMonday && item.technical_focus_primary_category_id)?.technical_focus_primary_category_id ?? null;
+    const technical = rankTechnicalPriorities({ categories: exerciseCategories, goalkeepers: selectedGoalkeepers, matchDayOffset: profile.match_day_offset, usage: categoryUsage, daysSinceUse, weeklyPrimaryId: weeklyPrimary });
+    const automaticTechnicalId = Number(technical[0]?.id) || null;
+    const chosenTechnicalId = generationMode === "Manuale" && technicalFocusId ? technicalFocusId : automaticTechnicalId;
+    const technicalLabel = exerciseCategories.find(item => item.id === chosenTechnicalId)?.nome;
+    const physical = rankPhysicalPriorities({ dimensions: physicalAssessmentDimensions, goalkeepers: selectedGoalkeepers, matchDayOffset: profile.match_day_offset, preseason, athleticRecall: profile.athletic_recall, technicalFocusLabel: technicalLabel });
+    const chosenPhysicalId = generationMode === "Manuale" && physicalFocusId ? physicalFocusId : physical[0]?.id ?? null;
+    setSessionProfile(profile); setTechnicalRanking(technical); setPhysicalRanking(physical);
+    setTechnicalFocusId(chosenTechnicalId); setTechnicalSecondaryFocusId(Number(technical.find(item => Number(item.id) !== chosenTechnicalId)?.id) || null); setPhysicalFocusId(chosenPhysicalId);
+    setSessionBlocks(buildSessionBlocks(profile, chosenTechnicalId, chosenPhysicalId));
+    setGeneratedExercises(null);
+    if (selectedGoalkeepers.length) setKeepers(selectedGoalkeepers.length);
+    setToast("Priorità e quattro blocchi calcolati");
+  }
+
+  function generateExercisePlan() {
+    if (!sessionProfile || sessionBlocks.length !== 4 || !technicalFocusId) { setToast("Completa prima profilo, focus e blocchi"); return; }
+    const result = makeEditableSession(selectSessionExercises(buildExerciseSelectionInput()));
+    setGeneratedExercises(result); setRegenerationCount(0); setSessionConfirmed(false);
+    setToast(result.selections.length ? `${result.selections.length} esercizi selezionati dal catalogo` : "Nessun candidato sicuro: controlla portieri e blocchi");
+  }
+
+  function buildExerciseSelectionInput() {
+    if (!sessionProfile) throw new Error("Profilo seduta non disponibile");
+    const history = trainings.filter(training => training.id !== editingTrainingId).flatMap(training => training.training_exercises.map(item => ({ exercise_id: item.exercise.id, training_date: training.training_date, season_id: training.season_id })));
+    return { seed: editingTrainingId ?? `${date}:${season?.id ?? "no-season"}`, date, seasonId: season?.id, profile: sessionProfile, goalkeeperCount: selectedGoalkeeperIds.length || keepers, exercises, blocks: sessionBlocks, technicalPrimaryId: technicalFocusId, technicalSecondaryId: technicalSecondaryFocusId, physicalPrimaryId: physicalFocusId, physicalDimensions: physicalAssessmentDimensions, history, technicalPriorities: technicalRanking, physicalPriorities: physicalRanking };
+  }
+
+  function updateGeneratedSelections(selections: EditableExerciseSelection[]) {
+    setGeneratedExercises(current => current ? { ...current, selections, net_minutes: selections.reduce((sum,item)=>sum+item.planned_duration_minutes,0), total_minutes: selections.reduce((sum,item)=>sum+item.planned_duration_minutes,0)+current.transition_minutes } : current);
+  }
+
+  function toggleExerciseLock(id:string){if(!generatedExercises)return;updateGeneratedSelections(generatedExercises.selections.map(x=>x.exercise.id===id?{...x,locked:!x.locked}:x));}
+  function changePlannedDuration(id:string,value:number){if(!generatedExercises)return;updateGeneratedSelections(generatedExercises.selections.map(x=>x.exercise.id===id?{...x,planned_duration_minutes:Math.max(5,value)}:x));}
+  function removeGeneratedExercise(id:string){if(!generatedExercises||!window.confirm("Rimuovere questo esercizio dalla seduta?"))return;updateGeneratedSelections(generatedExercises.selections.filter(x=>x.exercise.id!==id));}
+  function moveGeneratedExercise(id:string,direction:-1|1){if(!generatedExercises)return;const list=[...generatedExercises.selections];const index=list.findIndex(x=>x.exercise.id===id);if(index<0)return;const same=list.filter(x=>x.block_order===list[index].block_order);const local=same.findIndex(x=>x.exercise.id===id);const swap=same[local+direction];if(!swap)return;const other=list.findIndex(x=>x.exercise.id===swap.exercise.id);[list[index],list[other]]=[list[other],list[index]];updateGeneratedSelections(list.map((x)=>({...x,block_position:list.filter(y=>y.block_order===x.block_order).indexOf(x)})));}
+  function regenerateOneBlock(order:number){if(!generatedExercises||!window.confirm("Rigenerare gli esercizi non bloccati di questo blocco?"))return;const next=regenerateBlock(buildExerciseSelectionInput(),generatedExercises,order,regenerationCount+1);setRegenerationCount(x=>x+1);setGeneratedExercises(next);}
+  function regenerateAllExercises(){if(!generatedExercises||!window.confirm("Rigenerare tutti gli esercizi non bloccati della seduta?"))return;const next=regenerateSession(buildExerciseSelectionInput(),generatedExercises,regenerationCount+1);setRegenerationCount(x=>x+1);setGeneratedExercises(next);}
+  function openReplacement(id:string){if(!generatedExercises)return;const target=generatedExercises.selections.find(x=>x.exercise.id===id);if(!target)return;setReplacementTarget(target);setReplacementCandidates(getReplacementCandidates(buildExerciseSelectionInput(),generatedExercises,target));}
+  function applyReplacement(candidate:ScoredExerciseCandidate,reason:string,source:"replacement"|"manual"="replacement"){if(!generatedExercises||!replacementTarget)return;updateGeneratedSelections(generatedExercises.selections.map(x=>x.exercise.id===replacementTarget.exercise.id?{...candidate,block_order:x.block_order,block_position:x.block_position,planned_duration_minutes:x.planned_duration_minutes,individual_variant_suggestion:null,locked:false,source,replacement_reason:reason,replacement_note:null,variants:[]}:x));setReplacementTarget(null);setManualPickerBlock(null);}
+  function addManualExercise(candidate:ScoredExerciseCandidate){if(!generatedExercises||manualPickerBlock===null)return;if(generatedExercises.selections.some(x=>x.exercise.id===candidate.exercise.id)){setToast("Esercizio già presente nella seduta");return;}const position=generatedExercises.selections.filter(x=>x.block_order===manualPickerBlock).length;const item={...candidate,block_order:manualPickerBlock,block_position:position,planned_duration_minutes:candidate.exercise.durata_min,individual_variant_suggestion:null,locked:false,source:"manual" as const,variants:[]};updateGeneratedSelections([...generatedExercises.selections,item]);setManualPickerBlock(null);setReplacementTarget(null);}
+  function openVariants(id:string){const target=generatedExercises?.selections.find(x=>x.exercise.id===id);if(target)setVariantTarget(target);}
+  function saveVariants(variants:TrainingExerciseVariant[]){if(!generatedExercises||!variantTarget)return;updateGeneratedSelections(generatedExercises.selections.map(x=>x.exercise.id===variantTarget.exercise.id?{...x,variants}:x));setVariantTarget(null);}
+  function recalculateWholeSession(){if(!generatedExercises||!window.confirm("Ricalcolare priorità, focus e struttura? Gli esercizi bloccati resteranno visibili e andranno verificati."))return;const locked=generatedExercises.selections.filter(x=>x.locked);generateSessionPlan();setGeneratedExercises({...generatedExercises,selections:locked,net_minutes:locked.reduce((s,x)=>s+x.planned_duration_minutes,0),total_minutes:locked.reduce((s,x)=>s+x.planned_duration_minutes,0)+generatedExercises.transition_minutes});setToast("Priorità ricalcolate: rigenera i blocchi non bloccati");}
+
   async function saveSession() {
-    if (!supabase || !session.length) { setToast("Genera prima una proposta con almeno un esercizio"); return; }
+    if (!supabase) return;
+    if (!generatedExercises?.selections.length) { setToast("Genera prima la preview completa"); return; }
+    if (!sessionBlocks.every(block => generatedExercises.selections.some(item => item.block_order === block.ordine))) { setToast("La preview deve contenere tutti e quattro i blocchi"); return; }
+    const currentTraining = editingTrainingId ? trainings.find(item => item.id === editingTrainingId) : null;
+    if (!sessionProfile || sessionBlocks.length !== 4) { setToast("Calcola prima priorità e blocchi"); return; }
+    const technicalFocus = exerciseCategories.find(item => item.id === technicalFocusId);
+    const secondaryTechnicalFocus = exerciseCategories.find(item => item.id === technicalSecondaryFocusId);
+    const physicalDimension = physicalAssessmentDimensions.find(item => item.id === physicalFocusId);
+    const existingInitialSnapshot = currentTraining?.session_generation_snapshot && Object.keys(currentTraining.session_generation_snapshot).length ? currentTraining.session_generation_snapshot : null;
+    const initialSnapshot = existingInitialSnapshot ?? { profile: sessionProfile, technical_ranking: technicalRanking, physical_ranking: physicalRanking, technical_primary: technicalFocusId, technical_secondary: technicalSecondaryFocusId, physical_primary: physicalFocusId, quality: sessionQuality, exercises: generatedExercises.selections.map(x=>({exercise_id:x.exercise.id,code:x.exercise.codice,block_order:x.block_order,score:x.exercise_score,duration:x.planned_duration_minutes})), seed:generatedExercises.seed };
     const trainingPayload = {
       training_date: date,
       planned_duration_minutes: duration,
       goalkeeper_count: keepers,
-      status: "planned",
-      physical_objective_id: selectedPhysicalObjectiveId || null,
+      status: sessionConfirmed ? "confirmed" : "draft",
+      physical_objective_id: selectedPhysicalObjectiveId || currentTraining?.physical_objective_id || null,
+      technical_objective_primary: technicalFocus?.nome ?? currentTraining?.technical_objective_primary ?? null,
+      technical_objective_secondary: secondaryTechnicalFocus?.nome ?? currentTraining?.technical_objective_secondary ?? null,
+      content_status: "compiled",
+      generation_mode: generationMode,
+      focus_source: generationMode,
+      technical_focus_primary_category_id: technicalFocusId,
+      technical_focus_secondary_category_id: technicalSecondaryFocusId,
+      physical_focus_dimension_id: physicalFocusId,
+      session_profile_code: sessionProfile.code,
+      session_profile_snapshot: sessionProfile,
+      technical_ranking_snapshot: technicalRanking,
+      physical_ranking_snapshot: physicalRanking,
+      generation_reason_snapshot: { technical: technicalRanking[0]?.reason, physical: physicalRanking[0]?.reason, physical_label: physicalDimension?.nome },
+      session_generation_snapshot: initialSnapshot,
+      current_quality_snapshot: sessionQuality ?? {},
+      regeneration_count: regenerationCount,
+      revision_number: editingTrainingId ? (currentTraining?.revision_number ?? 1) + 1 : 1,
+      confirmed_at: sessionConfirmed ? new Date().toISOString() : currentTraining?.confirmed_at ?? null,
     };
     const saveResult = editingTrainingId
       ? await supabase.from("trainings").update(trainingPayload).eq("id", editingTrainingId).select("id").single()
@@ -280,21 +487,36 @@ export function KeeperApp() {
 
     if (editingTrainingId) {
       const cleanup = await Promise.all([
-        supabase.from("training_objectives").delete().eq("training_id", training.id),
-        supabase.from("training_exercises").delete().eq("training_id", training.id),
+        supabase.from("training_goalkeepers").delete().eq("training_id", training.id),
+        Promise.resolve({ error: null }),
       ]);
       if (cleanup.some(result => result.error)) { setToast("La seduta non è stata aggiornata completamente"); return; }
     }
 
     const [objectiveResult, exerciseResult] = await Promise.all([
-      selectedObjectives.length ? supabase.from("training_objectives").insert(selectedObjectives.map(objective => ({ training_id: training.id, objective }))) : Promise.resolve({ error: null }),
-      supabase.from("training_exercises").insert(session.map((exercise, position) => ({ training_id: training.id, exercise_id: exercise.id, position, planned_duration_minutes: exercise.durata_min }))),
+      selectedGoalkeeperIds.length ? supabase.from("training_goalkeepers").insert(selectedGoalkeeperIds.map(goalkeeperId => ({ training_id: training.id, goalkeeper_id: goalkeeperId }))) : Promise.resolve({ error: null }),
+      supabase.from("training_blocks").upsert(sessionBlocks.map(block => ({ ...block, training_id: training.id })), { onConflict: "training_id,ordine" }),
     ]);
     if (objectiveResult.error || exerciseResult.error) {
       if (!editingTrainingId) await supabase.from("trainings").delete().eq("id", training.id);
       setToast("La seduta non è stata salvata completamente");
       return;
     }
+    const savedBlocks = await supabase.from("training_blocks").select("id,ordine").eq("training_id", training.id).order("ordine");
+    if (savedBlocks.error || !savedBlocks.data?.length) { setToast("Blocchi salvati, ma associazione esercizi non disponibile"); return; }
+    const blockIds = new Map(savedBlocks.data.map(block => [Number(block.ordine), block.id]));
+    const exerciseItems = generatedExercises.selections.map((selection, position) => ({
+      exercise_id: selection.exercise.id, position, planned_duration_minutes: selection.planned_duration_minutes,
+      training_block_id: blockIds.get(selection.block_order), block_position: selection.block_position,
+      exercise_score: selection.exercise_score, fallback_level: selection.fallback_level,
+      individual_variant_suggestion: selection.individual_variant_suggestion,
+      locked: selection.locked, source: selection.source, replacement_reason: selection.replacement_reason ?? null, replacement_note: selection.replacement_note ?? null,
+      selection_snapshot: { version: "fase3-v1", seed: generatedExercises.seed, exercise_code: selection.exercise.codice, exercise_name: selection.exercise.nome, block_order: selection.block_order, exercise_score: selection.exercise_score, breakdown: selection.breakdown, group_weakness_bonus: selection.group_weakness_bonus, similarity_penalty: selection.similarity_penalty, usage: selection.usage, reasons: selection.reasons, penalties: selection.penalties, fallback_level: selection.fallback_level, session_profile: sessionProfile },
+    }));
+    const generatedResult = await supabase.rpc("replace_generated_training_exercises", { requested_training_id: training.id, requested_items: exerciseItems });
+    if (generatedResult.error) { setToast(`Esercizi non salvati: ${generatedResult.error.message}`); return; }
+    const savedExercises = await supabase.from("training_exercises").select("id,exercise_id").eq("training_id",training.id);
+    if(!savedExercises.error){const variants=generatedExercises.selections.flatMap(selection=>(selection.variants??[]).map(variant=>({...variant,training_exercise_id:savedExercises.data?.find(row=>row.exercise_id===selection.exercise.id)?.id}))).filter(item=>item.training_exercise_id);if(variants.length)await supabase.from("training_exercise_goalkeeper_variants").upsert(variants,{onConflict:"training_exercise_id,goalkeeper_id"});}
     await loadTrainings();
     setToast(editingTrainingId ? "Seduta aggiornata" : "Allenamento salvato nell’agenda");
     setEditingTrainingId(null);
@@ -302,6 +524,7 @@ export function KeeperApp() {
   }
 
   function startNewTraining() {
+    setSeasonSettingsOpen(false);
     setEditingTrainingId(null);
     setDate(dateKey(new Date()));
     setDuration(settings.default_duration_minutes);
@@ -309,6 +532,10 @@ export function KeeperApp() {
     setSelectedObjectives([]);
     setSelectedPhysicalObjectiveId("");
     setSession([]);
+    setGenerationMode("Automatico");
+    setSelectedGoalkeeperIds(goalkeepers.filter(item => item.attivo).map(item => item.id));
+    setSessionProfile(null); setTechnicalRanking([]); setPhysicalRanking([]);
+    setTechnicalFocusId(null); setTechnicalSecondaryFocusId(null); setPhysicalFocusId(null); setSessionBlocks([]); setGeneratedExercises(null); setSessionQuality(null); setSessionConfirmed(false); setRegenerationCount(0);
     setSection("builder");
   }
 
@@ -320,6 +547,16 @@ export function KeeperApp() {
     setSelectedObjectives(training.training_objectives.map(item => item.objective));
     setSelectedPhysicalObjectiveId(training.physical_objective_id ?? "");
     setSession(training.training_exercises.map(item => item.exercise).filter(Boolean));
+    setGenerationMode(training.generation_mode ?? "Assistito");
+    setSelectedGoalkeeperIds(training.training_goalkeepers?.map(item => item.goalkeeper_id) ?? []);
+    setSessionProfile(training.session_profile_snapshot && "code" in training.session_profile_snapshot ? training.session_profile_snapshot as SessionProfile : null);
+    setTechnicalRanking(training.technical_ranking_snapshot ?? []); setPhysicalRanking(training.physical_ranking_snapshot ?? []);
+    setTechnicalFocusId(training.technical_focus_primary_category_id ?? null); setTechnicalSecondaryFocusId(training.technical_focus_secondary_category_id ?? null); setPhysicalFocusId(training.physical_focus_dimension_id ?? null);
+    setSessionBlocks(training.training_blocks ?? []);
+    const blocks=training.training_blocks??[];
+    const selections=training.training_exercises.map(item=>{const snapshot=item.selection_snapshot??{};const block=blocks.find(b=>b.id===item.training_block_id);return{exercise:item.exercise,exercise_score:Number(item.exercise_score??snapshot.exercise_score??50),breakdown:(snapshot.breakdown??{technical_fit:50,physical_fit:50,methodological_fit:50,rotation_score:50,md_load_fit:50,practical_fit:50}) as EditableExerciseSelection["breakdown"],group_weakness_bonus:Number(snapshot.group_weakness_bonus??0),similarity_penalty:Number(snapshot.similarity_penalty??0),fallback_level:Number(item.fallback_level??0),usage:(snapshot.usage??{last_used_date:null,days_since_last_use:null,uses_this_season:0,uses_last_30_days:0,uses_last_14_days:0,uses_last_7_days:0}) as EditableExerciseSelection["usage"],reasons:(snapshot.reasons??[]) as string[],penalties:(snapshot.penalties??[]) as string[],block_order:block?.ordine??Number(snapshot.block_order??1),block_position:Number(item.block_position??0),planned_duration_minutes:item.planned_duration_minutes,individual_variant_suggestion:item.individual_variant_suggestion??null,session_exercise_id:item.id,locked:Boolean(item.locked),source:item.source??"legacy",replacement_reason:item.replacement_reason??null,replacement_note:item.replacement_note??null,variants:item.variants??[]};});
+    const transitions=blocks.reduce((s,b)=>s+(b.transition_minutes??2),0);const net=selections.reduce((s,x)=>s+x.planned_duration_minutes,0);setGeneratedExercises(selections.length?{seed:String(training.session_generation_snapshot?.seed??training.id),selections,debug:{},net_minutes:net,transition_minutes:transitions,total_minutes:net+transitions}:null);
+    setSessionConfirmed(training.status==="confirmed");setRegenerationCount(training.regeneration_count??0);setSessionQuality(training.current_quality_snapshot&&"score" in training.current_quality_snapshot?training.current_quality_snapshot as SessionQualityResult:null);
     setOpenTraining(null);
     setSection("builder");
   }
@@ -334,6 +571,97 @@ export function KeeperApp() {
     setOpenTraining(null);
     await loadTrainings();
     setToast("Seduta eliminata dall’agenda");
+  }
+
+  async function saveSeasonConfiguration(configuration: SeasonConfiguration) {
+    if (!supabase) return null;
+    setSeasonBusy(true);
+    try {
+      let seasonId = configuration.season.id || season?.id;
+      const seasonPayload = { nome_stagione: configuration.season.nome_stagione, data_inizio: configuration.season.data_inizio, data_fine: configuration.season.data_fine, squadra: configuration.season.squadra, numero_portieri_standard: configuration.season.numero_portieri_standard, attiva: true };
+      if (seasonId) {
+        const { error } = await supabase.from("seasons").update(seasonPayload).eq("id", seasonId);
+        if (error) throw error;
+      } else {
+        await supabase.from("seasons").update({ attiva: false }).eq("attiva", true);
+        const { data, error } = await supabase.from("seasons").insert(seasonPayload).select("id").single();
+        if (error || !data) throw error ?? new Error("Stagione non creata");
+        seasonId = data.id;
+      }
+      const phasePayload = configuration.phases.map(item => {
+        const { id, ...values } = item;
+        return id ? { ...values, id, season_id: seasonId } : { ...values, season_id: seasonId };
+      });
+      const phaseResult = await supabase.from("season_phases").upsert(phasePayload, { onConflict: "season_id,tipo" });
+      if (phaseResult.error) throw phaseResult.error;
+      const { id: recallId, ...recallValues } = configuration.recall;
+      const recallPayload = recallId ? { ...recallValues, id: recallId, season_id: seasonId } : { ...recallValues, season_id: seasonId };
+      const recallResult = await supabase.from("season_recall_periods").upsert(recallPayload, { onConflict: "season_id" });
+      if (recallResult.error) throw recallResult.error;
+      const profilePayload = configuration.profiles.map(item => {
+        const { id, ...values } = item;
+        return id ? { ...values, id, season_id: seasonId } : { ...values, season_id: seasonId };
+      });
+      const profileResult = await supabase.from("season_training_profiles").upsert(profilePayload, { onConflict: "season_id,match_day_offset" });
+      if (profileResult.error) throw profileResult.error;
+      await loadSeasonCalendar();
+      setToast("Impostazioni stagione salvate");
+      return seasonId ?? null;
+    } catch (error) {
+      setToast(`Impostazioni non salvate: ${readableError(error)}`);
+      return null;
+    } finally { setSeasonBusy(false); }
+  }
+
+  async function generateSeasonAgenda(requestedSeasonId?: string) {
+    const seasonId = requestedSeasonId || season?.id;
+    if (!supabase || !seasonId) { setToast("Salva prima le impostazioni stagione"); return; }
+    setSeasonBusy(true);
+    try {
+      const preview = await supabase.rpc("preview_season_agenda", { requested_season_id: seasonId });
+      if (preview.error) throw preview.error;
+      const values = preview.data as Record<string, number>;
+      const confirmed = window.confirm(`Aggiornare l’agenda?\n\nGiornate vuote rigenerabili: ${values.giornate_vuote_rigenerabili ?? 0}\nSedute compilate preservate: ${values.sedute_compilate_preservate ?? 0}\nGare manuali preservate: ${values.gare_manuali_preservate ?? 0}\nEccezioni preservate: ${values.eccezioni_preservate ?? 0}`);
+      if (!confirmed) return;
+      const result = await supabase.rpc("generate_season_agenda", { requested_season_id: seasonId });
+      if (result.error) throw result.error;
+      await Promise.all([loadSeasonCalendar(), loadTrainings()]);
+      setToast("Agenda stagione generata e sedute compilate preservate");
+      setSeasonSettingsOpen(false);
+    } catch (error) {
+      setToast(`Agenda non generata: ${error instanceof Error ? error.message : "errore sconosciuto"}`);
+    } finally { setSeasonBusy(false); }
+  }
+
+  async function saveSeasonMatch(match: Partial<SeasonMatch> & Pick<SeasonMatch, "data" | "tipo">) {
+    if (!supabase || !season) { setToast("Salva prima la stagione"); return; }
+    const payload = { season_id: season.id, data: match.data, tipo: match.tipo, avversario: match.avversario || null, casa_trasferta: match.casa_trasferta || null, note: match.note || null, origine: "Manuale", bloccata: true, attiva: true };
+    const result = match.id ? await supabase.from("matches").update(payload).eq("id", match.id) : await supabase.from("matches").insert(payload);
+    if (result.error) setToast(`Gara non salvata: ${result.error.message}`); else { await loadSeasonCalendar(); setToast("Gara salvata"); }
+  }
+
+  async function deleteSeasonMatch(match: SeasonMatch) {
+    if (!supabase || match.origine !== "Manuale" || !window.confirm("Rimuovere questa gara manuale?")) return;
+    const { error } = await supabase.from("matches").delete().eq("id", match.id);
+    if (error) setToast(`Gara non rimossa: ${error.message}`); else { await loadSeasonCalendar(); setToast("Gara rimossa"); }
+  }
+
+  async function saveCalendarException(exception: Partial<CalendarException> & Pick<CalendarException, "data" | "tipo_giornata">) {
+    if (!supabase || !season) { setToast("Salva prima la stagione"); return; }
+    const { error } = await supabase.from("calendar_exceptions").upsert({ season_id: season.id, data: exception.data, tipo_giornata: exception.tipo_giornata, durata_prevista: exception.durata_prevista ?? null, carico_previsto: exception.carico_previsto ?? null, numero_portieri_previsti: exception.numero_portieri_previsti ?? null, note: exception.note || null }, { onConflict: "season_id,data" });
+    if (error) { setToast(`Eccezione non salvata: ${error.message}`); return; }
+    await supabase.rpc("generate_season_agenda", { requested_season_id: season.id });
+    await Promise.all([loadSeasonCalendar(), loadTrainings()]);
+    setOpenCalendarDay(null); setToast("Eccezione applicata alla singola giornata");
+  }
+
+  async function deleteCalendarException(exception: CalendarException) {
+    if (!supabase || !season || !window.confirm("Rimuovere questa eccezione?")) return;
+    const { error } = await supabase.from("calendar_exceptions").delete().eq("id", exception.id);
+    if (error) { setToast(`Eccezione non rimossa: ${error.message}`); return; }
+    await supabase.rpc("generate_season_agenda", { requested_season_id: season.id });
+    await Promise.all([loadSeasonCalendar(), loadTrainings()]);
+    setToast("Eccezione rimossa");
   }
 
   async function saveExercise(draft: ExerciseDraft, schemaImage: File | null, photoImage: File | null) {
@@ -461,6 +789,38 @@ export function KeeperApp() {
     setToast("Esercizio disattivato");
   }
 
+  async function saveGoalkeeper(draft: GoalkeeperDraft, id?: string) {
+    if (!supabase) return false;
+    const payload = { ...draft, nome: draft.nome.trim(), cognome: draft.cognome.trim(), data_nascita: draft.data_nascita || null, note: draft.note || null };
+    const result = id ? await supabase.from("goalkeepers").update(payload).eq("id", id) : await supabase.from("goalkeepers").insert(payload);
+    if (result.error) { setToast(`Portiere non salvato: ${result.error.message}`); return false; }
+    await loadGoalkeepers();
+    setToast(id ? "Anagrafica portiere aggiornata" : "Portiere aggiunto");
+    return true;
+  }
+
+  async function deactivateGoalkeeper(goalkeeper: Goalkeeper) {
+    if (!supabase || !window.confirm(`Disattivare ${goalkeeper.nome} ${goalkeeper.cognome}? Lo storico resterà disponibile.`)) return;
+    const { error } = await supabase.from("goalkeepers").update({ attivo: false }).eq("id", goalkeeper.id);
+    if (error) { setToast(`Portiere non disattivato: ${error.message}`); return; }
+    await loadGoalkeepers();
+    setToast("Portiere disattivato senza eliminare lo storico");
+  }
+
+  async function saveGoalkeeperAssessment(goalkeeper: Goalkeeper, draft: GoalkeeperAssessmentDraft) {
+    if (!supabase) return false;
+    const { error } = await supabase.rpc("create_goalkeeper_assessment", {
+      requested_goalkeeper_id: goalkeeper.id,
+      requested_assessment_date: draft.data_valutazione,
+      requested_general_notes: draft.note_generali,
+      requested_items: draft.items.map(item => ({ ...item, score: Number(item.score.toFixed(1)) })),
+    });
+    if (error) { setToast(`Valutazione non salvata: ${error.message}`); return false; }
+    await loadGoalkeepers();
+    setToast("Nuova valutazione salvata nello storico");
+    return true;
+  }
+
   async function saveSettings(next: AppSettings) {
     if (!supabase) return;
     const payload = { ...next, phone: next.phone || null, training_location: next.training_location || null };
@@ -481,18 +841,21 @@ export function KeeperApp() {
   ];
   const technicalNav = [{ id: "archive" as const, icon: "▦", label: "Archivio esercizi" }];
   const physicalNav = [{ id: "physical" as const, icon: "◇", label: "Obiettivi fisici" }];
-  const nav = [...trainingNav, ...technicalNav, ...physicalNav];
+  const teamNav = [{ id: "goalkeepers" as const, icon: "♙", label: "Portieri" }];
+  const nav = [...trainingNav, ...technicalNav, ...physicalNav, ...teamNav];
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">K</span> KeeperLab</div>
         <div className="side-label">Allenamento</div>
-        {trainingNav.map(item => <button key={item.id} className={`nav-button ${section === item.id ? "active" : ""}`} onClick={() => setSection(item.id)}><span className="nav-icon">{item.icon}</span>{item.label}</button>)}
+        {trainingNav.map(item => <button key={item.id} className={`nav-button ${section === item.id ? "active" : ""}`} onClick={() => { setSection(item.id); if (item.id === "agenda") setSeasonSettingsOpen(false); }}><span className="nav-icon">{item.icon}</span>{item.label}</button>)}
         <div className="side-label group-side-label">Area tecnica</div>
         {technicalNav.map(item => <button key={item.id} className={`nav-button ${section === item.id ? "active" : ""}`} onClick={() => setSection(item.id)}><span className="nav-icon">{item.icon}</span>{item.label}</button>)}
         <div className="side-label group-side-label">Preparazione fisica</div>
         {physicalNav.map(item => <button key={item.id} className={`nav-button ${section === item.id ? "active" : ""}`} onClick={() => setSection(item.id)}><span className="nav-icon">{item.icon}</span>{item.label}</button>)}
+        <div className="side-label group-side-label">Squadra</div>
+        {teamNav.map(item => <button key={item.id} className={`nav-button ${section === item.id ? "active" : ""}`} onClick={() => setSection(item.id)}><span className="nav-icon">{item.icon}</span>{item.label}</button>)}
         <div className="coach-card"><div className="avatar">{initials}</div><div><strong>{settings.coach_name}</strong><span>{settings.role}</span></div></div>
       </aside>
 
@@ -502,8 +865,11 @@ export function KeeperApp() {
           {loading ? <div className="loading-state">Caricamento archivio e agenda…</div> : null}
           {!loading && section === "archive" && <Archive exercises={filtered} categories={exerciseCategories} subcategories={availableSubcategories} physicalObjectives={physicalObjectives} search={search} setSearch={setSearch} categoryFilter={categoryFilter} setCategoryFilter={value => { setCategoryFilter(value); setSubcategoryFilter("all"); }} subcategoryFilter={subcategoryFilter} setSubcategoryFilter={setSubcategoryFilter} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} intensityFilter={intensityFilter} setIntensityFilter={setIntensityFilter} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter} physicalObjectiveFilter={physicalObjectiveFilter} setPhysicalObjectiveFilter={setPhysicalObjectiveFilter} onNew={() => setEditingExercise("new")} onImportImages={() => setBulkImageOpen(true)} onOpen={setOpenExercise} onEdit={setEditingExercise} onDelete={deleteExercise} />}
           {!loading && section === "physical" && <PhysicalObjectivesPage objectives={physicalObjectives} />}
-          {!loading && section === "builder" && <Builder editing={Boolean(editingTrainingId)} date={date} setDate={setDate} duration={duration} setDuration={setDuration} keepers={keepers} setKeepers={setKeepers} objectives={objectives} selectedObjectives={selectedObjectives} setSelectedObjectives={setSelectedObjectives} physicalObjectives={physicalObjectives} selectedPhysicalObjectiveId={selectedPhysicalObjectiveId} setSelectedPhysicalObjectiveId={setSelectedPhysicalObjectiveId} session={session} totalMinutes={totalMinutes} onGenerate={generateSession} onSwap={swapExercise} onSave={saveSession} />}
-          {!loading && section === "agenda" && <Agenda trainings={trainings} weekStart={weekStart} setWeekStart={setWeekStart} onOpen={setOpenTraining} onCreate={startNewTraining} />}
+          {!loading && section === "goalkeepers" && <GoalkeepersPage goalkeepers={goalkeepers} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} onSaveGoalkeeper={saveGoalkeeper} onDeactivate={deactivateGoalkeeper} onSaveAssessment={saveGoalkeeperAssessment} />}
+          {!loading && section === "builder" && <SessionPlanner editing={Boolean(editingTrainingId)} date={date} duration={duration} keepers={keepers} mode={generationMode} seasonPhase={seasonPhases.find(item=>date>=item.data_inizio&&date<=item.data_fine)?.tipo??"Non specificata"} profile={sessionProfile} goalkeepers={goalkeepers} selectedGoalkeeperIds={selectedGoalkeeperIds} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} technicalRanking={technicalRanking} physicalRanking={physicalRanking} technicalFocusId={technicalFocusId} technicalSecondaryFocusId={technicalSecondaryFocusId} physicalFocusId={physicalFocusId} blocks={sessionBlocks} generatedExercises={generatedExercises} quality={sessionQuality} confirmed={sessionConfirmed} onDate={value => { setDate(value); setGeneratedExercises(null); }} onDuration={value => { setDuration(value); setSessionProfile(null); setSessionBlocks([]); setGeneratedExercises(null); }} onKeepers={value => { setKeepers(value); setGeneratedExercises(null); }} onMode={setGenerationMode} onGoalkeepers={value => { setSelectedGoalkeeperIds(value); setGeneratedExercises(null); }} onTechnicalFocus={value => { setTechnicalFocusId(value); setGeneratedExercises(null); if (sessionProfile) setSessionBlocks(buildSessionBlocks(sessionProfile, value, physicalFocusId)); }} onTechnicalSecondaryFocus={value => { setTechnicalSecondaryFocusId(value); setGeneratedExercises(null); }} onPhysicalFocus={value => { setPhysicalFocusId(value); setGeneratedExercises(null); if (sessionProfile) setSessionBlocks(buildSessionBlocks(sessionProfile, technicalFocusId, value)); }} onBlocks={value => { setSessionBlocks(value); setGeneratedExercises(null); }} onGenerate={generateSessionPlan} onGenerateExercises={generateExercisePlan} onOpenExercise={(exercise,plannedDuration,variants)=>setSessionExerciseDetail({exercise:exercises.find(item=>item.id===exercise.id)??exercise,plannedDuration,variants})} onToggleLock={toggleExerciseLock} onExerciseDuration={changePlannedDuration} onRemove={removeGeneratedExercise} onReplace={openReplacement} onVariants={openVariants} onMove={moveGeneratedExercise} onRegenerateBlock={regenerateOneBlock} onRegenerateSession={regenerateAllExercises} onRecalculateAll={recalculateWholeSession} onAdd={setManualPickerBlock} onConfirm={()=>setSessionConfirmed(true)} onSave={saveSession} />}
+          {!loading && section === "agenda" && (seasonSettingsOpen
+            ? <SeasonSettings settings={settings} season={season} phases={seasonPhases} recall={seasonRecall} profiles={seasonProfiles} matches={seasonMatches} exceptions={calendarExceptions} busy={seasonBusy} onClose={() => setSeasonSettingsOpen(false)} onSave={saveSeasonConfiguration} onGenerate={generateSeasonAgenda} onSaveMatch={saveSeasonMatch} onDeleteMatch={deleteSeasonMatch} onSaveException={saveCalendarException} onDeleteException={deleteCalendarException} />
+            : <SeasonAgenda calendarDays={calendarDays} trainings={trainings} weekStart={weekStart} setWeekStart={setWeekStart} onOpenTraining={setOpenTraining} onOpenDay={setOpenCalendarDay} onCreate={startNewTraining} onSettings={() => setSeasonSettingsOpen(true)} />)}
         </div>
       </main>
 
@@ -512,8 +878,13 @@ export function KeeperApp() {
       {editingExercise && <ExerciseImageModal exercise={editingExercise === "new" ? null : editingExercise} categories={exerciseCategories} subcategories={exerciseSubcategories} physicalObjectives={physicalObjectives} onClose={() => setEditingExercise(null)} onSave={saveExercise} onImageChange={changeExerciseImage} onSavePhysicalMapping={saveExercisePhysicalMapping} onRemovePhysicalMapping={removeExercisePhysicalMapping} />}
       {openExercise && <ExerciseDetailModal exercise={openExercise} onClose={() => setOpenExercise(null)} onEdit={() => { setOpenExercise(null); setEditingExercise(openExercise); }} />}
       {bulkImageOpen && <BulkImageImportModal onClose={() => setBulkImageOpen(false)} onImport={importExerciseImages} />}
-      {openTraining && <TrainingModal training={openTraining} onClose={() => setOpenTraining(null)} onEdit={() => startEditTraining(openTraining)} onDelete={() => deleteTraining(openTraining)} />}
+      {openTraining && <PlannerTrainingModal training={openTraining} catalog={exercises} goalkeepers={goalkeepers} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} seasonPhases={seasonPhases} onOpenExercise={(exercise,plannedDuration,variants)=>setSessionExerciseDetail({exercise,plannedDuration,variants})} onClose={() => setOpenTraining(null)} onEdit={() => startEditTraining(openTraining)} onDelete={() => deleteTraining(openTraining)} />}
+      {sessionExerciseDetail && <ExerciseDetailModal exercise={sessionExerciseDetail.exercise} plannedDuration={sessionExerciseDetail.plannedDuration} variants={sessionExerciseDetail.variants} goalkeepers={goalkeepers} onClose={() => setSessionExerciseDetail(null)} onEdit={() => { setSessionExerciseDetail(null); setOpenTraining(null); setEditingExercise(sessionExerciseDetail.exercise); }} />}
+      {openCalendarDay && <CalendarDayModal day={openCalendarDay} trainings={trainings.filter(training => training.training_date === openCalendarDay.data)} onClose={() => setOpenCalendarDay(null)} onOpenTraining={training => { setOpenCalendarDay(null); setOpenTraining(training); }} onSaveException={saveCalendarException} />}
       {settingsOpen && <SettingsModal settings={settings} onClose={() => setSettingsOpen(false)} onSave={saveSettings} />}
+      {replacementTarget && manualPickerBlock === null && <ReplacementAlternativesModal target={replacementTarget} candidates={replacementCandidates} onClose={()=>setReplacementTarget(null)} onSelect={(candidate,reason)=>applyReplacement(candidate,reason)} onManual={()=>setManualPickerBlock(replacementTarget.block_order)} />}
+      {manualPickerBlock !== null && generatedExercises && <ManualExercisePicker exercises={exercises} score={exercise=>scoreManualExercise(buildExerciseSelectionInput(),generatedExercises,exercise,manualPickerBlock)} onClose={()=>{setManualPickerBlock(null);setReplacementTarget(null);}} onSelect={candidate=>replacementTarget?applyReplacement(candidate,"Preferenza personale","manual"):addManualExercise(candidate)} />}
+      {variantTarget && <IndividualVariantsEditor selection={variantTarget} goalkeepers={goalkeepers.filter(g=>selectedGoalkeeperIds.includes(g.id))} suggestions={buildIndividualVariantSuggestions(variantTarget,goalkeepers.filter(g=>selectedGoalkeeperIds.includes(g.id)))} onClose={()=>setVariantTarget(null)} onSave={saveVariants} />}
     </div>
   );
 }
@@ -522,7 +893,7 @@ function PageHead({ eyebrow, title, subtitle, action }: { eyebrow: string; title
   return <div className="page-head"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p className="subtitle">{subtitle}</p></div>{action}</div>;
 }
 
-type ArchiveProps = { exercises: Exercise[]; categories: ExerciseCategory[]; subcategories: string[]; physicalObjectives: PhysicalObjective[]; search: string; setSearch: (value: string) => void; categoryFilter: number | "all"; setCategoryFilter: (value: number | "all") => void; subcategoryFilter: string | "all"; setSubcategoryFilter: (value: string | "all") => void; phaseFilter: CatalogPhase | "all"; setPhaseFilter: (value: CatalogPhase | "all") => void; intensityFilter: Exercise["intensita"] | "all"; setIntensityFilter: (value: Exercise["intensita"] | "all") => void; difficultyFilter: 1 | 2 | 3 | 4 | "all"; setDifficultyFilter: (value: 1 | 2 | 3 | 4 | "all") => void; physicalObjectiveFilter: string | "all"; setPhysicalObjectiveFilter: (value: string | "all") => void; onNew: () => void; onImportImages: () => void; onOpen: (exercise: Exercise) => void; onEdit: (exercise: Exercise) => void; onDelete: (exercise: Exercise) => void };
+type ArchiveProps = { exercises: Exercise[]; categories: ExerciseCategory[]; subcategories: string[]; physicalObjectives: PhysicalObjective[]; search: string; setSearch: (value: string) => void; categoryFilter: number | "all"; setCategoryFilter: (value: number | "all") => void; subcategoryFilter: string | "all"; setSubcategoryFilter: (value: string | "all") => void; phaseFilter: CatalogPhase | "all"; setPhaseFilter: (value: CatalogPhase | "all") => void; intensityFilter: Exercise["intensita"] | "all"; setIntensityFilter: (value: Exercise["intensita"] | "all") => void; difficultyFilter: ExerciseDifficulty | "all"; setDifficultyFilter: (value: ExerciseDifficulty | "all") => void; physicalObjectiveFilter: string | "all"; setPhysicalObjectiveFilter: (value: string | "all") => void; onNew: () => void; onImportImages: () => void; onOpen: (exercise: Exercise) => void; onEdit: (exercise: Exercise) => void; onDelete: (exercise: Exercise) => void };
 function Archive(props: ArchiveProps) {
   const hasActiveFilters = props.search !== "" || props.categoryFilter !== "all" || props.subcategoryFilter !== "all" || props.phaseFilter !== "all" || props.intensityFilter !== "all" || props.difficultyFilter !== "all" || props.physicalObjectiveFilter !== "all";
   const resetFilters = () => {
@@ -549,9 +920,9 @@ function Archive(props: ArchiveProps) {
       <div className="archive-filter-grid">
         <label className="filter-field"><span>Categoria</span><select className="filter-select" aria-label="Filtra categoria" value={props.categoryFilter} onChange={event => props.setCategoryFilter(event.target.value === "all" ? "all" : Number(event.target.value))}><option value="all">Tutte le categorie</option>{props.categories.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></label>
         <label className="filter-field"><span>Sottocategoria</span><select className="filter-select" aria-label="Filtra sottocategoria" value={props.subcategoryFilter} onChange={event => props.setSubcategoryFilter(event.target.value)}><option value="all">Tutte le sottocategorie</option>{props.subcategories.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
-        <label className="filter-field"><span>Fase metodologica</span><select className="filter-select" aria-label="Filtra fase metodologica" value={props.phaseFilter} onChange={event => props.setPhaseFilter(event.target.value as CatalogPhase | "all")}><option value="all">Tutte le fasi</option>{(["Analitico", "Disturbo", "Situazionale"] as CatalogPhase[]).map(item => <option key={item}>{item}</option>)}</select></label>
-        <label className="filter-field"><span>Intensità</span><select className="filter-select" aria-label="Filtra intensità" value={props.intensityFilter} onChange={event => props.setIntensityFilter(event.target.value as Exercise["intensita"] | "all")}><option value="all">Tutte le intensità</option>{["Bassa", "Media", "Alta"].map(item => <option key={item}>{item}</option>)}</select></label>
-        <label className="filter-field"><span>Difficoltà</span><select className="filter-select" aria-label="Filtra difficoltà" value={props.difficultyFilter} onChange={event => props.setDifficultyFilter(event.target.value === "all" ? "all" : Number(event.target.value) as 1 | 2 | 3 | 4)}><option value="all">Tutte le difficoltà</option><option value="1">★ Base</option><option value="2">★★ Intermedio</option><option value="3">★★★ Avanzato</option><option value="4">★★★★ Élite</option></select></label>
+        <label className="filter-field"><span>Fase metodologica</span><select className="filter-select" aria-label="Filtra fase metodologica" value={props.phaseFilter} onChange={event => props.setPhaseFilter(event.target.value as CatalogPhase | "all")}><option value="all">Tutte le fasi</option>{catalogPhases.map(item => <option key={item}>{item}</option>)}</select></label>
+        <label className="filter-field"><span>Intensità</span><select className="filter-select" aria-label="Filtra intensità" value={props.intensityFilter} onChange={event => props.setIntensityFilter(event.target.value as Exercise["intensita"] | "all")}><option value="all">Tutte le intensità</option>{exerciseIntensities.map(item => <option key={item}>{item}</option>)}</select></label>
+        <label className="filter-field"><span>Difficoltà</span><select className="filter-select" aria-label="Filtra difficoltà" value={props.difficultyFilter} onChange={event => props.setDifficultyFilter(event.target.value === "all" ? "all" : Number(event.target.value) as ExerciseDifficulty)}><option value="all">Tutte le difficoltà</option><option value="1">★ Base</option><option value="2">★★ Intermedio</option><option value="3">★★★ Avanzato</option><option value="4">★★★★ Élite</option><option value="5">★★★★★ Master</option></select></label>
         <label className="filter-field physical-filter-field"><span>Obiettivo fisico</span><select className="filter-select" aria-label="Filtra obiettivo fisico" value={props.physicalObjectiveFilter} onChange={event => props.setPhysicalObjectiveFilter(event.target.value)}><option value="all">Tutti gli obiettivi fisici</option>{props.physicalObjectives.map(item => <option key={item.id} value={item.id}>{item.macro_area} &gt; {item.obiettivo_fisico}</option>)}</select></label>
       </div>
     </section>
@@ -700,13 +1071,13 @@ function ExerciseImageModal({ exercise, categories, subcategories, physicalObjec
       <div className="field"><label>Codice</label><input required readOnly={Boolean(exercise)} value={draft.codice} onChange={event => set("codice", event.target.value.toUpperCase())} /></div>
       <div className="field"><label>Nome</label><input required value={draft.nome} onChange={event => set("nome", event.target.value)} /></div>
       <div className="field"><label>Categoria</label><select required value={draft.category_id} onChange={event => changeCategory(Number(event.target.value))}>{categories.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></div>
-      <div className="field"><label>Fase metodologica</label><select value={draft.fase} onChange={event => changePhase(event.target.value as CatalogPhase)}>{(["Analitico", "Disturbo", "Situazionale"] as CatalogPhase[]).map(item => <option key={item}>{item}</option>)}</select></div>
+      <div className="field"><label>Fase metodologica</label><select value={draft.fase} onChange={event => changePhase(event.target.value as CatalogPhase)}>{catalogPhases.map(item => <option key={item}>{item}</option>)}</select></div>
       <div className="field"><label>Sottocategoria</label><select required value={draft.subcategory_id} onChange={event => changeSubcategory(Number(event.target.value))}>{validSubcategories.map(item => <option key={item.id} value={item.id}>{cleanSubcategoryLabel(item.nome)}</option>)}</select></div>
-      <div className="field"><label>Difficoltà</label><select value={draft.difficolta} onChange={event => set("difficolta", Number(event.target.value) as 1 | 2 | 3 | 4)}><option value="1">★ Base</option><option value="2">★★ Intermedio</option><option value="3">★★★ Avanzato</option><option value="4">★★★★ Élite</option></select></div>
+      <div className="field"><label>Difficoltà</label><select value={draft.difficolta} onChange={event => set("difficolta", Number(event.target.value) as ExerciseDifficulty)}><option value="1">★ Base</option><option value="2">★★ Intermedio</option><option value="3">★★★ Avanzato</option><option value="4">★★★★ Élite</option><option value="5">★★★★★ Master</option></select></div>
       <div className="field full"><label>Obiettivo</label><textarea required rows={2} value={draft.obiettivo} onChange={event => set("obiettivo", event.target.value)} /></div>
       <div className="field full"><label>Descrizione</label><textarea required rows={4} value={draft.descrizione} onChange={event => set("descrizione", event.target.value)} /></div>
       <div className="field"><label>Durata (minuti)</label><input required min="1" type="number" value={draft.durata_min} onChange={event => set("durata_min", Number(event.target.value))} /></div>
-      <div className="field"><label>Intensità</label><select value={draft.intensita} onChange={event => set("intensita", event.target.value as ExerciseDraft["intensita"])}><option>Bassa</option><option>Media</option><option>Alta</option></select></div>
+      <div className="field"><label>Intensità</label><select value={draft.intensita} onChange={event => set("intensita", event.target.value as ExerciseDraft["intensita"])}>{exerciseIntensities.map(item => <option key={item}>{item}</option>)}</select></div>
       <div className="field"><label>Portieri minimi</label><input required min="1" type="number" value={draft.portieri_min} onChange={event => set("portieri_min", Number(event.target.value))} /></div>
       <div className="field"><label>Portieri massimi</label><input required min={draft.portieri_min} type="number" value={draft.portieri_max} onChange={event => set("portieri_max", Number(event.target.value))} /></div>
       <div className="field full"><label>Materiale</label><input required value={draft.materiale} onChange={event => set("materiale", event.target.value)} /></div>
@@ -719,6 +1090,7 @@ function ExerciseImageModal({ exercise, categories, subcategories, physicalObjec
       <div className="field full procedure-fields"><label>Svolgimento · Passaggio 4</label><textarea rows={2} value={draft.schema_step_4 ?? ""} onChange={event => set("schema_step_4", event.target.value || null)} /></div>
       <div className="field full procedure-fields"><label>Svolgimento · Passaggio 5</label><textarea rows={2} value={draft.schema_step_5 ?? ""} onChange={event => set("schema_step_5", event.target.value || null)} /></div>
       <div className="field full procedure-fields"><label>Svolgimento · Passaggio 6</label><textarea rows={2} value={draft.schema_step_6 ?? ""} onChange={event => set("schema_step_6", event.target.value || null)} /></div>
+      {draft.categoria === "Match Simulation" && <><div className="field full"><label>Scenario gara</label><textarea rows={3} value={draft.scenario_gara ?? ""} onChange={event => set("scenario_gara", event.target.value || null)} /></div><div className="field"><label>Numero azioni</label><input value={draft.numero_azioni ?? ""} onChange={event => set("numero_azioni", event.target.value || null)} /></div></>}
       {exercise && <ExercisePhysicalObjectivesEditor mappings={exercise.physical_mappings ?? []} objectives={physicalObjectives} busyId={mappingBusyId} onSave={savePhysicalMapping} onRemove={removePhysicalMapping} />}
       <section className="exercise-images-section field full"><div className="exercise-images-title"><span>Immagini esercizio</span><small>WEBP, JPG, JPEG o PNG · salvataggio nello Storage Supabase</small></div><div className="exercise-images-grid">
         <ExerciseImageField label="Schema tecnico" kind="schema" url={draft.schema_url} selectedFile={schemaImage} busy={imageBusy === "schema"} immediate={Boolean(exercise)} onSelect={setSchemaImage} onUpload={file => uploadImage("schema", file)} onDelete={() => removeImage("schema")} />
@@ -730,13 +1102,44 @@ function ExerciseImageModal({ exercise, categories, subcategories, physicalObjec
   </form></div>;
 }
 
-function ExerciseDetailModal({ exercise, onClose, onEdit }: { exercise: Exercise; onClose: () => void; onEdit: () => void }) {
-  return <div className="modal-backdrop" onClick={onClose}><div className="modal exercise-card-modal" onClick={event => event.stopPropagation()}><button className="modal-close floating" onClick={onClose}>×</button><ExerciseCard exercise={exercise} onOpen={() => {}} onEdit={onEdit} onDeactivate={() => {}} showActions={false} variant="detail" /><div className="modal-actions"><button className="secondary" onClick={onClose}>Chiudi</button><button onClick={onEdit}>Modifica esercizio</button></div></div></div>;
+function ExerciseDetailModal({ exercise, onClose, onEdit, plannedDuration, variants = [], goalkeepers = [] }: { exercise: Exercise; onClose: () => void; onEdit: () => void; plannedDuration?: number; variants?: TrainingExerciseVariant[]; goalkeepers?: Goalkeeper[] }) {
+  const goalkeeperName=(id:string)=>{const goalkeeper=goalkeepers.find(item=>item.id===id);return goalkeeper?`${goalkeeper.nome} ${goalkeeper.cognome}`:"Portiere";};
+  return <div className="modal-backdrop session-exercise-detail-backdrop" onClick={onClose}><div className="modal exercise-card-modal session-exercise-detail-modal" onClick={event => event.stopPropagation()}><button className="modal-close floating" onClick={onClose} aria-label="Chiudi scheda esercizio">×</button>
+    {plannedDuration !== undefined && <div className="exercise-session-context"><div><small>Durata pianificata</small><strong>{plannedDuration} min</strong></div><div><small>Durata standard catalogo</small><strong>{exercise.durata_min} min</strong></div></div>}
+    <ExerciseCard exercise={exercise} onOpen={() => {}} onEdit={onEdit} onDeactivate={() => {}} showActions={false} variant="detail" />
+    {variants.some(item=>item.variante_individuale) && <section className="exercise-detail-variants"><h3>Varianti individuali</h3>{variants.filter(item=>item.variante_individuale).map((variant,index)=><article key={`${variant.goalkeeper_id}-${index}`}><strong>{goalkeeperName(variant.goalkeeper_id)}</strong><p>{variant.variante_individuale}</p>{variant.motivazione&&<small>{variant.motivazione}</small>}</article>)}</section>}
+    <div className="modal-actions"><button className="secondary" onClick={onClose}>Chiudi</button><button onClick={onEdit}>Modifica esercizio</button></div></div></div>;
+}
+
+function PlannerTrainingModal({ training, catalog, goalkeepers, categories, physicalDimensions, seasonPhases, onOpenExercise, onClose, onEdit, onDelete }: { training: Training; catalog:Exercise[];goalkeepers:Goalkeeper[];categories:ExerciseCategory[];physicalDimensions:PhysicalAssessmentDimension[];seasonPhases:SeasonPhaseConfig[];onOpenExercise:(exercise:Exercise,plannedDuration:number,variants:TrainingExerciseVariant[])=>void;onClose: () => void; onEdit: () => void; onDelete: () => void }) {
+  const [expanded,setExpanded]=useState<Record<number,boolean>>({});
+  const [fieldMode,setFieldMode]=useState(false);
+  const blocks=[...(training.training_blocks??[])].sort((a,b)=>a.ordine-b.ordine);
+  useEffect(()=>{const compact=window.matchMedia("(max-width: 640px)").matches;setExpanded(Object.fromEntries(blocks.map((block,index)=>[block.ordine,!compact||index===0])));},[training.id]);
+  const catalogById=new Map(catalog.map(exercise=>[exercise.id,exercise]));
+  const displayItems:SessionDisplayExercise[]=training.training_exercises.map((item,index)=>{
+    const snapshot=item.selection_snapshot??{};
+    const block=blocks.find(candidate=>candidate.id===item.training_block_id);
+    const snapshotOrder=typeof snapshot.block_order==="number"?snapshot.block_order:Number(snapshot.block_order??1);
+    return{id:item.id,exercise:catalogById.get(item.exercise.id)??item.exercise,plannedDuration:item.planned_duration_minutes,blockOrder:block?.ordine??snapshotOrder,blockPosition:item.block_position??index,locked:Boolean(item.locked),reasons:Array.isArray(snapshot.reasons)?snapshot.reasons.filter((reason):reason is string=>typeof reason==="string"):[],variants:item.variants??[]};
+  });
+  const technicalPrimary=training.technical_objective_primary||categories.find(item=>item.id===training.technical_focus_primary_category_id)?.nome||training.training_objectives[0]?.objective||"Non specificato";
+  const technicalSecondary=training.technical_objective_secondary||categories.find(item=>item.id===training.technical_focus_secondary_category_id)?.nome||null;
+  const physicalLabel=training.generation_reason_snapshot?.physical_label as string|undefined;
+  const physicalPrimary=physicalLabel||physicalDimensions.find(item=>item.id===training.physical_focus_dimension_id)?.nome||(training.physical_objective?`${training.physical_objective.macro_area} > ${training.physical_objective.obiettivo_fisico}`:"Non specificato");
+  const phase=seasonPhases.find(item=>item.id===training.season_phase_id)||seasonPhases.find(item=>training.training_date>=item.data_inizio&&training.training_date<=item.data_fine);
+  const selectedGoalkeepers=goalkeepers.filter(goalkeeper=>training.training_goalkeepers?.some(item=>item.goalkeeper_id===goalkeeper.id));
+  const goalkeeperName=(id:string)=>{const goalkeeper=goalkeepers.find(item=>item.id===id);return goalkeeper?`${goalkeeper.nome} ${goalkeeper.cognome}`:"Portiere";};
+  const quality=training.current_quality_snapshot&&"score" in training.current_quality_snapshot?Number(training.current_quality_snapshot.score):null;
+  return <><div className="modal-backdrop" onClick={onClose}><div className="modal training-detail-modal rich-training-modal" onClick={event => event.stopPropagation()}><div className="training-modal-tools"><button className="training-icon-action edit" onClick={onEdit} aria-label="Modifica seduta" title="Modifica seduta">✎</button><button className="training-icon-action delete" onClick={onDelete} aria-label="Elimina seduta" title="Elimina seduta">×</button></div>
+    <SessionOverviewHeader date={training.training_date} matchDay={training.session_profile_code||(training.match_day_offset!==null&&training.match_day_offset!==undefined?`MD${training.match_day_offset}`:"MD")} seasonPhase={phase?.tipo??"Non specificata"} duration={training.planned_duration_minutes} load={training.planned_load||((training.session_profile_snapshot as SessionProfile|undefined)?.load)||"Non specificato"} goalkeeperCount={training.goalkeeper_count} technicalPrimary={technicalPrimary} technicalSecondary={technicalSecondary} physicalPrimary={physicalPrimary} goalkeeperNames={selectedGoalkeepers.map(item=>`${item.nome} ${item.cognome}`)} quality={quality} onFieldMode={()=>setFieldMode(true)}/>
+    <div className="saved-session-blocks">{blocks.map((block,index)=>{const items=groupSessionExercises(displayItems,block.ordine);const isOpen=expanded[block.ordine]??true;const blockTechnical=categories.find(item=>item.id===block.technical_category_id)?.nome;const blockPhysical=physicalDimensions.find(item=>item.id===block.physical_dimension_id)?.nome;return <article className={`generated-block rich-block ${isOpen?"open":"collapsed"}`} key={block.ordine}><header><button className="block-collapse" onClick={()=>setExpanded(current=>({...current,[block.ordine]:!isOpen}))} aria-expanded={isOpen} aria-label={`${isOpen?"Comprimi":"Espandi"} blocco ${String.fromCharCode(65+index)}`}><b>{String.fromCharCode(65+index)}</b><span>{isOpen?"⌃":"⌄"}</span></button><div className="rich-block-heading"><strong>{block.tipo_blocco}</strong><small>{block.durata_target} min · {items.length} {items.length===1?"esercizio":"esercizi"}</small></div><div className="rich-block-targets"><span>{block.fase_metodologica_preferita||"Fase libera"}</span><span>Carico {block.carico_target||"libero"}</span>{blockTechnical&&<span>Focus {blockTechnical}</span>}{blockPhysical&&<span>Fisico {blockPhysical}</span>}</div></header>{isOpen&&<div className="rich-block-body">{items.length?items.map(item=><SessionExerciseCard key={item.id} item={item} number={displayItems.findIndex(candidate=>candidate.id===item.id)+1} goalkeeperName={goalkeeperName} onOpen={()=>onOpenExercise(item.exercise,item.plannedDuration,item.variants)}/>):<p className="planner-empty">Nessun esercizio salvato in questo blocco.</p>}</div>}</article>})}</div>
+    <div className="modal-actions"><button className="secondary" onClick={onClose}>Chiudi</button></div></div></div>{fieldMode&&<SessionFieldMode items={displayItems} blocks={blocks} goalkeeperName={goalkeeperName} onClose={()=>setFieldMode(false)}/>}</>;
 }
 
 function TrainingModal({ training, onClose, onEdit, onDelete }: { training: Training; onClose: () => void; onEdit: () => void; onDelete: () => void }) {
   const label = new Intl.DateTimeFormat("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(`${training.training_date}T12:00:00`));
-  const technicalObjective = training.training_objectives[0]?.objective || "Non specificato";
+  const technicalObjective = training.technical_objective_primary || training.training_objectives[0]?.objective || "Non specificato";
   return <div className="modal-backdrop" onClick={onClose}><div className="modal training-detail-modal" onClick={event => event.stopPropagation()}><div className="training-modal-tools"><button className="training-icon-action edit" onClick={onEdit} aria-label="Modifica seduta" title="Modifica seduta">✎</button><button className="training-icon-action delete" onClick={onDelete} aria-label="Elimina seduta" title="Elimina seduta">×</button></div><span className="eyebrow">Seduta completa</span><h2>{label}</h2><p>{training.planned_duration_minutes} minuti · {training.goalkeeper_count} portieri</p><div className="training-objective-panels"><section className="training-objective technical"><span>Obiettivo tecnico</span><strong>{technicalObjective}</strong></section><section className="training-objective physical"><span>Obiettivo fisico</span><strong>{training.physical_objective ? `${training.physical_objective.macro_area} > ${training.physical_objective.obiettivo_fisico}` : "Non specificato"}</strong></section></div><div className="session-list">{training.training_exercises.map((item, index) => <div className="session-row" key={item.id}><div className="duration">{item.planned_duration_minutes}&apos;</div><div><strong>{index + 1}. {item.exercise.nome}</strong><small>{item.exercise.category?.nome} · {item.exercise.obiettivo}</small></div></div>)}</div><div className="modal-actions"><button className="secondary" onClick={onClose}>Chiudi</button></div></div></div>;
 }
 

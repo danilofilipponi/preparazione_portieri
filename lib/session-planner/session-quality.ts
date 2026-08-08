@@ -1,0 +1,19 @@
+import type { EditableExerciseSelection, SessionBlock, SessionQualityResult, SessionValidationItem } from "../types.ts";
+export const SESSION_QUALITY_WEIGHTS={technical:.20,physical:.15,md_load:.15,methodology:.15,rotation:.15,duration:.10,practical:.10} as const;
+const avg=(values:number[])=>values.length?values.reduce((a,b)=>a+b,0)/values.length:0; const clamp=(n:number)=>Math.round(Math.max(0,Math.min(100,n))*10)/10;
+export function calculateSessionQuality(input:{selections:EditableExerciseSelection[];blocks:SessionBlock[];durationTarget:number;goalkeeperCount:number;technicalPrimaryId:number|null;technicalSecondaryId:number|null}):SessionQualityResult{
+ const s=input.selections; const validation:SessionValidationItem[]=[]; const duplicates=s.filter((x,i)=>s.findIndex(y=>y.exercise.id===x.exercise.id)!==i);
+ const primary=s.some(x=>x.exercise.category_id===input.technicalPrimaryId); const secondary=!input.technicalSecondaryId||s.some(x=>x.exercise.category_id===input.technicalSecondaryId);
+ const technical=clamp(avg(s.map(x=>x.breakdown.technical_fit))*.65+(primary?25:0)+(secondary?10:0));
+ const physical=clamp(avg(s.map(x=>x.breakdown.physical_fit))); const md_load=clamp(avg(s.map(x=>x.breakdown.md_load_fit))); const methodology=clamp(avg(s.map(x=>x.breakdown.methodological_fit)));
+ const repeatedSub=s.filter((x,i)=>s.findIndex(y=>y.exercise.subcategory_id===x.exercise.subcategory_id)!==i).length; const rotation=clamp(avg(s.map(x=>x.breakdown.rotation_score))-repeatedSub*6);
+ const transitions=input.blocks.reduce((sum,b)=>sum+(b.transition_minutes??2),0); const total=s.reduce((sum,x)=>sum+x.planned_duration_minutes,0)+transitions; const diff=Math.abs(total-input.durationTarget); const duration=clamp(100-diff*(diff<=5?5:8)); const practical=clamp(avg(s.map(x=>x.breakdown.practical_fit)));
+ if(Math.abs(total-input.durationTarget)<=1)validation.push({level:"success",code:"duration",message:`Durata ${total}/${input.durationTarget} min`});else validation.push({level:"warning",code:"duration",message:`Durata ${total}/${input.durationTarget} min`});
+ validation.push(primary?{level:"success",code:"primary",message:"Focus tecnico principale coperto"}:{level:"warning",code:"primary",message:"Focus tecnico principale poco coperto"});
+ validation.push(physical>=60?{level:"success",code:"physical",message:"Obiettivo fisico compatibile"}:{level:"warning",code:"physical",message:"Compatibilità fisica ridotta"});
+ validation.push(md_load>=60?{level:"success",code:"load",message:"Carico coerente con il profilo"}:{level:"warning",code:"load",message:"Carico da verificare rispetto al Match Day"});
+ validation.push(methodology>=65?{level:"success",code:"methodology",message:"Progressione metodologica coerente"}:{level:"warning",code:"methodology",message:"Progressione metodologica non ottimale"});
+ validation.push(duplicates.length?{level:"warning",code:"duplicates",message:"È presente un esercizio duplicato"}:{level:"success",code:"duplicates",message:"Nessun esercizio duplicato"});
+ for(const item of s){if(!item.exercise.attivo)validation.push({level:"error",code:`inactive:${item.exercise.id}`,message:`${item.exercise.codice} non è attivo`});if(input.goalkeeperCount<item.exercise.portieri_min)validation.push({level:"error",code:`keepers:${item.exercise.id}`,message:`${item.exercise.codice} richiede almeno ${item.exercise.portieri_min} portieri`});if((item.usage.days_since_last_use??99)<=7)validation.push({level:"warning",code:`recent:${item.exercise.id}`,message:`${item.exercise.codice} utilizzato ${item.usage.days_since_last_use} giorni fa`});}
+ const components={technical,physical,md_load,methodology,rotation,duration,practical}; const score=clamp(Object.entries(SESSION_QUALITY_WEIGHTS).reduce((sum,[k,w])=>sum+components[k as keyof typeof components]*w,0)); return{score,components,validation};
+}

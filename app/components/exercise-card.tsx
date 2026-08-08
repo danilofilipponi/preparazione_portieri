@@ -36,7 +36,7 @@ function PhysicalComponents({ exercise }: { exercise: Exercise }) {
       <div className="manual-physical-role">{mapping.ruolo}</div>
       <div className="manual-physical-name"><span>{mapping.physical_objective.macro_area}</span><strong>{mapping.physical_objective.obiettivo_fisico}</strong><small>{mapping.physical_objective.codice}</small></div>
       <div className="manual-physical-weight" aria-label={`Compatibilità ${mapping.peso} su 5`}><strong>{"★".repeat(mapping.peso)}<i>{"☆".repeat(5 - mapping.peso)}</i></strong><span>{mapping.peso}/5</span></div>
-      {mapping.motivazione && <p>{mapping.motivazione}</p>}
+      {mapping.motivazione && <details className="physical-mapping-reason"><summary>Motivazione</summary><p>{mapping.motivazione}</p></details>}
     </article>)}</div>
   </section>;
 }
@@ -57,7 +57,7 @@ export function ExerciseCard({ exercise, onOpen, onEdit, onDeactivate, showActio
       <p className="catalog-subcategory">{exercise.sottocategoria}</p>
       <p className="catalog-objective"><b>Obiettivo</b>{exercise.obiettivo}</p>
       {procedureSteps.length > 0 && <div className="catalog-steps"><b>Svolgimento</b>{procedureSteps.map((step, index) => <span key={`${exercise.codice}-step-${index + 1}`}><i>{index + 1}</i>{step}</span>)}</div>}
-      <div className="catalog-card-facts"><span>♙ <b>{exercise.portieri_min}–{exercise.portieri_max}</b></span><span>◷ <b>{exercise.durata_min} min</b></span><span className="catalog-stars">{"★".repeat(exercise.difficolta)}{"☆".repeat(4 - exercise.difficolta)}</span></div>
+      <div className="catalog-card-facts"><span>♙ <b>{exercise.portieri_min}–{exercise.portieri_max}</b></span><span>◷ <b>{exercise.durata_min} min</b></span><span className="catalog-stars">{"★".repeat(exercise.difficolta)}{"☆".repeat(5 - exercise.difficolta)}</span></div>
       {showActions && <footer className="technical-actions manual-actions"><button className="secondary" onClick={() => onOpen(exercise)}>Apri scheda</button><button className="secondary" onClick={() => onEdit(exercise)}>Modifica</button><button className="danger-link" onClick={() => onDeactivate(exercise)}>Disattiva</button></footer>}
     </div>
   </article>;
@@ -78,6 +78,7 @@ export function ExerciseCard({ exercise, onOpen, onEdit, onDeactivate, showActio
       </div>
       <div className="manual-legend"><h3>Descrizione</h3><p>{exercise.descrizione}</p></div>
       {procedureSteps.length > 0 && <div className="manual-procedure"><h3>Svolgimento</h3><ol>{procedureSteps.map((step, index) => <li key={`${exercise.codice}-detail-step-${index + 1}`}>{step}</li>)}</ol></div>}
+      {(exercise.scenario_gara || exercise.numero_azioni) && <div className="manual-match-context"><div><h3>Scenario gara</h3><p>{exercise.scenario_gara || "Scenario non indicato."}</p></div><div><small>Numero azioni</small><strong>{exercise.numero_azioni || "—"}</strong></div></div>}
     </section>
 
     <section className="manual-facts">
@@ -98,7 +99,7 @@ export function ExerciseCard({ exercise, onOpen, onEdit, onDeactivate, showActio
     <section className="manual-bottom performance-only">
       <div className="manual-performance">
         <Fact icon="▥" label="Intensità">{exercise.intensita}</Fact>
-        <div className="manual-rating"><small>Difficoltà</small><strong>{"★".repeat(exercise.difficolta)}<i>{"☆".repeat(4 - exercise.difficolta)}</i></strong></div>
+        <div className="manual-rating"><small>Difficoltà</small><strong>{"★".repeat(exercise.difficolta)}<i>{"☆".repeat(5 - exercise.difficolta)}</i></strong></div>
         <Fact icon="♙" label="Portieri">{exercise.portieri_min}–{exercise.portieri_max}</Fact>
       </div>
     </section>
