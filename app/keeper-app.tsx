@@ -1137,7 +1137,7 @@ function ExerciseDetailModal({ exercise, onClose, onEdit, plannedDuration, varia
 function PlannerTrainingModal({ training, catalog, goalkeepers, categories, physicalDimensions, seasonPhases, onOpenExercise, onClose, onEdit, onDelete }: { training: Training; catalog:Exercise[];goalkeepers:Goalkeeper[];categories:ExerciseCategory[];physicalDimensions:PhysicalAssessmentDimension[];seasonPhases:SeasonPhaseConfig[];onOpenExercise:(exercise:Exercise,plannedDuration:number,variants:TrainingExerciseVariant[])=>void;onClose: () => void; onEdit: () => void; onDelete: () => void }) {
   const [expanded,setExpanded]=useState<Record<number,boolean>>({});
   const [fieldMode,setFieldMode]=useState(false);
-  const blocks=[...(training.training_blocks??[])].sort((a,b)=>a.ordine-b.ordine);
+  const blocks=useMemo(()=>[...(training.training_blocks??[])].sort((a,b)=>a.ordine-b.ordine),[training.training_blocks]);
   useEffect(()=>{const frame=window.requestAnimationFrame(()=>{const compact=window.matchMedia("(max-width: 640px)").matches;setExpanded(Object.fromEntries(blocks.map((block,index)=>[block.ordine,!compact||index===0])));});return()=>window.cancelAnimationFrame(frame);},[training.id,blocks]);
   const catalogById=new Map(catalog.map(exercise=>[exercise.id,exercise]));
   const displayItems:SessionDisplayExercise[]=training.training_exercises.map((item,index)=>{
