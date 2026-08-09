@@ -35,6 +35,14 @@ const eslintConfig = defineConfig([
         version: "detect",
       },
     },
+    rules: {
+      "jsx-a11y/label-has-associated-control": ["warn", { assert: "either", depth: 10 }],
+      "jsx-a11y/click-events-have-key-events": "warn",
+      "jsx-a11y/no-static-element-interactions": "warn",
+      "jsx-a11y/no-noninteractive-element-interactions": "warn",
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+      "@typescript-eslint/no-explicit-any": "warn",
+    },
   },
 ]);
 

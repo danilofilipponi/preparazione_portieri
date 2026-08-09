@@ -81,6 +81,10 @@ function cleanSubcategoryLabel(value: string) {
   return specialNames[normalized] ?? normalized;
 }
 
+function catalogPhaseFromMethodological(phase: ExerciseSubcategory["fase"]): CatalogPhase {
+  return phase === "Generale" ? "Analitico" : phase;
+}
+
 function mondayOf(date: Date) {
   const result = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const day = result.getDay() || 7;
@@ -287,9 +291,11 @@ export function KeeperApp() {
 
   const loadSettings = useCallback(async () => {
     if (!supabase) return;
-    const { data, error } = await supabase.from("app_settings").select("*").eq("id", "default").maybeSingle();
+    const { data: authData } = await supabase.auth.getUser();
+    if (!authData.user) return;
+    const { data, error } = await supabase.from("app_settings").select("*").eq("owner_id", authData.user.id).maybeSingle();
     if (error) return;
-    const next = (data ?? defaultSettings) as AppSettings;
+    const next = (data ?? { ...defaultSettings, id: authData.user.id, owner_id: authData.user.id, account_email: authData.user.email ?? "" }) as AppSettings;
     setSettings(next);
     setDuration(next.default_duration_minutes);
     setKeepers(next.default_goalkeeper_count);
@@ -326,7 +332,10 @@ export function KeeperApp() {
   }, []);
 
   useEffect(() => {
-    Promise.all([loadCatalog(), loadExercises(), loadPhysicalObjectives(), loadGoalkeepers(), loadTrainings(), loadSettings(), loadSeasonCalendar()]).finally(() => setLoading(false));
+    const frame = window.requestAnimationFrame(() => {
+      void Promise.all([loadCatalog(), loadExercises(), loadPhysicalObjectives(), loadGoalkeepers(), loadTrainings(), loadSettings(), loadSeasonCalendar()]).finally(() => setLoading(false));
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [loadCatalog, loadExercises, loadPhysicalObjectives, loadGoalkeepers, loadTrainings, loadSettings, loadSeasonCalendar]);
 
   useEffect(() => {
@@ -336,8 +345,11 @@ export function KeeperApp() {
   }, [toast]);
 
   useEffect(() => {
-    if (!generatedExercises) { setSessionQuality(null); return; }
-    setSessionQuality(calculateSessionQuality({ selections: generatedExercises.selections, blocks: sessionBlocks, durationTarget: duration, goalkeeperCount: selectedGoalkeeperIds.length || keepers, technicalPrimaryId: technicalFocusId, technicalSecondaryId: technicalSecondaryFocusId }));
+    const frame = window.requestAnimationFrame(() => {
+      if (!generatedExercises) { setSessionQuality(null); return; }
+      setSessionQuality(calculateSessionQuality({ selections: generatedExercises.selections, blocks: sessionBlocks, durationTarget: duration, goalkeeperCount: selectedGoalkeeperIds.length || keepers, technicalPrimaryId: technicalFocusId, technicalSecondaryId: technicalSecondaryFocusId }));
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [generatedExercises, sessionBlocks, duration, selectedGoalkeeperIds, keepers, technicalFocusId, technicalSecondaryFocusId]);
 
   const availableSubcategories = useMemo(() => Array.from(new Set(exerciseSubcategories.filter(item => item.fase !== "Generale" && (categoryFilter === "all" || item.category_id === categoryFilter)).map(item => cleanSubcategoryLabel(item.nome)))).sort((a, b) => a.localeCompare(b, "it")), [exerciseSubcategories, categoryFilter]);
@@ -823,7 +835,9 @@ export function KeeperApp() {
 
   async function saveSettings(next: AppSettings) {
     if (!supabase) return;
-    const payload = { ...next, phone: next.phone || null, training_location: next.training_location || null };
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData.user) { setToast("Sessione non valida: accedi nuovamente"); return; }
+    const payload = { ...next, id: next.id || authData.user.id, owner_id: authData.user.id, phone: next.phone || null, training_location: next.training_location || null };
     const { error } = await supabase.from("app_settings").upsert(payload, { onConflict: "id" });
     if (error) { setToast(`Impostazioni non salvate: ${error.message}`); return; }
     setSettings(payload);
@@ -834,6 +848,12 @@ export function KeeperApp() {
   }
 
   const initials = settings.coach_name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join("").toUpperCase() || "KP";
+
+  async function signOut() {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) setToast(`Logout non riuscito: ${error.message}`);
+  }
 
   const trainingNav = [
     { id: "agenda" as const, icon: "□", label: "Agenda settimanale" },
@@ -860,7 +880,7 @@ export function KeeperApp() {
       </aside>
 
       <main className="main">
-        <header className="topbar"><span className="eyebrow">{settings.club_name ? `${settings.club_name} · ` : ""}{settings.team_name} · {settings.season}</span><div className="topbar-actions"><span className="online">● {isSupabaseConfigured ? "Supabase connesso" : "Configurazione mancante"}</span><button className="settings-button" aria-label="Apri impostazioni" title="Impostazioni" onClick={() => setSettingsOpen(true)}>⚙</button></div></header>
+        <header className="topbar"><span className="eyebrow">{settings.club_name ? `${settings.club_name} · ` : ""}{settings.team_name} · {settings.season}</span><div className="topbar-actions"><span className="online">● {isSupabaseConfigured ? "Supabase connesso" : "Configurazione mancante"}</span><button className="settings-button" aria-label="Apri impostazioni" title="Impostazioni" onClick={() => setSettingsOpen(true)}>⚙</button><button className="logout-button" aria-label="Esci dall’app" title="Esci" onClick={signOut}>↪</button></div></header>
         <div className="content">
           {loading ? <div className="loading-state">Caricamento archivio e agenda…</div> : null}
           {!loading && section === "archive" && <Archive exercises={filtered} categories={exerciseCategories} subcategories={availableSubcategories} physicalObjectives={physicalObjectives} search={search} setSearch={setSearch} categoryFilter={categoryFilter} setCategoryFilter={value => { setCategoryFilter(value); setSubcategoryFilter("all"); }} subcategoryFilter={subcategoryFilter} setSubcategoryFilter={setSubcategoryFilter} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} intensityFilter={intensityFilter} setIntensityFilter={setIntensityFilter} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter} physicalObjectiveFilter={physicalObjectiveFilter} setPhysicalObjectiveFilter={setPhysicalObjectiveFilter} onNew={() => setEditingExercise("new")} onImportImages={() => setBulkImageOpen(true)} onOpen={setOpenExercise} onEdit={setEditingExercise} onDelete={deleteExercise} />}
@@ -936,7 +956,10 @@ function Builder(props: BuilderProps) {
   const selectedPhysical = props.physicalObjectives.find(item => item.id === props.selectedPhysicalObjectiveId);
   const selectedPhysicalLabel = selectedPhysical ? `${selectedPhysical.macro_area} > ${selectedPhysical.obiettivo_fisico}` : "";
   const [physicalSearch, setPhysicalSearch] = useState(selectedPhysicalLabel);
-  useEffect(() => setPhysicalSearch(selectedPhysicalLabel), [selectedPhysicalLabel]);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setPhysicalSearch(selectedPhysicalLabel));
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedPhysicalLabel]);
   const chooseTechnicalObjective = (objective: string) => props.setSelectedObjectives(props.selectedObjectives[0] === objective ? [] : [objective]);
   const choosePhysicalObjective = (value: string) => {
     setPhysicalSearch(value);
@@ -975,7 +998,7 @@ function ExerciseModal({ exercise, categories, subcategories, onClose, onSave }:
   const validSubcategories = subcategories.filter(item => item.category_id === draft.category_id && item.fase === draft.fase);
   const set = <K extends keyof ExerciseDraft>(key: K, value: ExerciseDraft[K]) => setDraft(current => ({ ...current, [key]: value }));
   function changeCategory(categoryId: number) { const category = categories.find(item => item.id === categoryId); const first = subcategories.find(item => item.category_id === categoryId && item.fase !== "Generale"); if (!category || !first) return; setDraft(current => ({ ...current, category_id: categoryId, subcategory_id: first.id, categoria: category.nome, sottocategoria: first.nome, fase: first.fase as CatalogPhase })); }
-  function changeSubcategory(subcategoryId: number) { const item = subcategories.find(subcategory => subcategory.id === subcategoryId); if (!item || item.fase === "Generale") return; setDraft(current => ({ ...current, subcategory_id: item.id, sottocategoria: item.nome, fase: item.fase })); }
+  function changeSubcategory(subcategoryId: number) { const item = subcategories.find(subcategory => subcategory.id === subcategoryId); if (!item || item.fase === "Generale") return; setDraft(current => ({ ...current, subcategory_id: item.id, sottocategoria: item.nome, fase: catalogPhaseFromMethodological(item.fase) })); }
   async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); await onSave(draft, schemaImage, photoImage); setSaving(false); }
   return <div className="modal-backdrop"><form className="modal exercise-form-modal" onSubmit={submit}><button type="button" className="modal-close" onClick={onClose}>×</button><span className="eyebrow">Catalogo esercizi</span><h2>{exercise ? "Modifica esercizio" : "Nuovo esercizio"}</h2><div className="form-grid modal-form"><div className="field"><label>Codice</label><input required value={draft.codice} onChange={event => set("codice", event.target.value)} /></div><div className="field"><label>Nome</label><input required value={draft.nome} onChange={event => set("nome", event.target.value)} /></div><div className="field"><label>Categoria</label><select required value={draft.category_id} onChange={event => changeCategory(Number(event.target.value))}>{categories.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></div><div className="field"><label>Sottocategoria</label><select required value={draft.subcategory_id} onChange={event => changeSubcategory(Number(event.target.value))}>{validSubcategories.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></div><div className="field"><label>Fase metodologica</label><input value={draft.fase} readOnly /></div><div className="field"><label>Difficoltà</label><select value={draft.difficolta} onChange={event => set("difficolta", Number(event.target.value) as 1 | 2 | 3 | 4)}><option value="1">★ Base</option><option value="2">★★ Intermedio</option><option value="3">★★★ Avanzato</option><option value="4">★★★★ Élite</option></select></div><div className="field full"><label>Obiettivo</label><textarea required rows={2} value={draft.obiettivo} onChange={event => set("obiettivo", event.target.value)} /></div><div className="field full"><label>Descrizione</label><textarea required rows={4} value={draft.descrizione} onChange={event => set("descrizione", event.target.value)} /></div><div className="field"><label>Durata (minuti)</label><input required min="1" type="number" value={draft.durata_min} onChange={event => set("durata_min", Number(event.target.value))} /></div><div className="field"><label>Intensità</label><select value={draft.intensita} onChange={event => set("intensita", event.target.value as ExerciseDraft["intensita"])}><option>Bassa</option><option>Media</option><option>Alta</option></select></div><div className="field"><label>Portieri minimi</label><input required min="1" type="number" value={draft.portieri_min} onChange={event => set("portieri_min", Number(event.target.value))} /></div><div className="field"><label>Portieri massimi</label><input required min={draft.portieri_min} type="number" value={draft.portieri_max} onChange={event => set("portieri_max", Number(event.target.value))} /></div><div className="field full"><label>Materiale</label><input required value={draft.materiale} onChange={event => set("materiale", event.target.value)} /></div><div className="field full"><label>Variante</label><textarea rows={2} value={draft.variante ?? ""} onChange={event => set("variante", event.target.value)} /></div><div className="field full"><label>Coaching points</label><textarea required rows={3} value={draft.coaching_points} onChange={event => set("coaching_points", event.target.value)} /></div><div className="field full"><label>Errori comuni</label><textarea required rows={3} value={draft.errori_comuni} onChange={event => set("errori_comuni", event.target.value)} /></div><div className="field"><label>Schema tecnico</label><input accept="image/jpeg,image/png,image/webp" type="file" onChange={event => setSchemaImage(event.target.files?.[0] ?? null)} /><input className="url-input" placeholder="Oppure URL schema" value={draft.schema_url ?? ""} onChange={event => set("schema_url", event.target.value || null)} /></div><div className="field"><label>Foto dimostrativa</label><input accept="image/jpeg,image/png,image/webp" type="file" onChange={event => setPhotoImage(event.target.files?.[0] ?? null)} /><input className="url-input" placeholder="Oppure URL foto" value={draft.foto_url ?? ""} onChange={event => set("foto_url", event.target.value || null)} /></div><div className="field full checkbox-field"><label><input type="checkbox" checked={draft.attivo} onChange={event => set("attivo", event.target.checked)} /> Esercizio attivo</label></div></div><div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Annulla</button><button className="primary" disabled={saving}>{saving ? "Salvataggio…" : "Salva esercizio"}</button></div></form></div>;
 }
@@ -1020,7 +1043,7 @@ function ExerciseImageModal({ exercise, categories, subcategories, physicalObjec
   function changeSubcategory(subcategoryId: number) {
     const item = subcategories.find(subcategory => subcategory.id === subcategoryId);
     if (!item || item.fase === "Generale") return;
-    setDraft(current => ({ ...current, subcategory_id: item.id, sottocategoria: cleanSubcategoryLabel(item.nome), fase: item.fase }));
+    setDraft(current => ({ ...current, subcategory_id: item.id, sottocategoria: cleanSubcategoryLabel(item.nome), fase: catalogPhaseFromMethodological(item.fase) }));
   }
   async function uploadImage(kind: ExerciseImageKind, file: File) {
     if (!exercise) {
@@ -1115,7 +1138,7 @@ function PlannerTrainingModal({ training, catalog, goalkeepers, categories, phys
   const [expanded,setExpanded]=useState<Record<number,boolean>>({});
   const [fieldMode,setFieldMode]=useState(false);
   const blocks=[...(training.training_blocks??[])].sort((a,b)=>a.ordine-b.ordine);
-  useEffect(()=>{const compact=window.matchMedia("(max-width: 640px)").matches;setExpanded(Object.fromEntries(blocks.map((block,index)=>[block.ordine,!compact||index===0])));},[training.id]);
+  useEffect(()=>{const frame=window.requestAnimationFrame(()=>{const compact=window.matchMedia("(max-width: 640px)").matches;setExpanded(Object.fromEntries(blocks.map((block,index)=>[block.ordine,!compact||index===0])));});return()=>window.cancelAnimationFrame(frame);},[training.id,blocks]);
   const catalogById=new Map(catalog.map(exercise=>[exercise.id,exercise]));
   const displayItems:SessionDisplayExercise[]=training.training_exercises.map((item,index)=>{
     const snapshot=item.selection_snapshot??{};

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ExercisePhysicalObjective, ExercisePhysicalObjectiveRole, PhysicalObjective } from "../../lib/types";
 
 export type PhysicalMappingDraft = {
@@ -21,7 +21,6 @@ function MappingRow({ mapping, objectives, saving, onSave, onRemove }: {
   onRemove: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState<PhysicalMappingDraft>({ physical_objective_id: mapping.physical_objective_id, ruolo: mapping.ruolo, peso: mapping.peso, motivazione: mapping.motivazione ?? "" });
-  useEffect(() => setDraft({ physical_objective_id: mapping.physical_objective_id, ruolo: mapping.ruolo, peso: mapping.peso, motivazione: mapping.motivazione ?? "" }), [mapping.physical_objective_id, mapping.ruolo, mapping.peso, mapping.motivazione]);
   const objective = objectives.find(item => item.id === mapping.physical_objective_id) ?? mapping.physical_objective;
   return <div className="physical-mapping-row">
     <div className="physical-mapping-name"><span>{objective.codice} · {objective.macro_area}</span><strong>{objective.obiettivo_fisico}</strong></div>
@@ -60,6 +59,6 @@ export function ExercisePhysicalObjectivesEditor({ mappings, objectives, busyId,
       <div className="physical-mapping-actions"><button type="button" className="primary" disabled={!newDraft.physical_objective_id || busyId === "new"} onClick={addMapping}>Salva associazione</button><button type="button" className="secondary" onClick={() => setAdding(false)}>Annulla</button></div>
     </div>}
     {!sorted.length && !adding && <div className="mapping-empty">Nessun obiettivo fisico associato.</div>}
-    <div className="physical-mapping-list">{sorted.map(mapping => <MappingRow key={mapping.id} mapping={mapping} objectives={objectives} saving={busyId === mapping.id} onSave={onSave} onRemove={() => onRemove(mapping)} />)}</div>
+    <div className="physical-mapping-list">{sorted.map(mapping => <MappingRow key={`${mapping.id}-${mapping.ruolo}-${mapping.peso}-${mapping.motivazione ?? ""}`} mapping={mapping} objectives={objectives} saving={busyId === mapping.id} onSave={onSave} onRemove={() => onRemove(mapping)} />)}</div>
   </section>;
 }

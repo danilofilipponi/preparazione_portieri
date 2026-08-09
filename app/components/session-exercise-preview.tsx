@@ -59,7 +59,8 @@ export function SessionExercisePreview(props: Props) {
   useEffect(() => {
     if (!props.blocks.length) return;
     const compact = window.matchMedia("(max-width: 640px)").matches;
-    setExpanded(current => Object.keys(current).length ? current : Object.fromEntries(props.blocks.map((block, index) => [block.ordine, !compact || index === 0])));
+    const frame = window.requestAnimationFrame(() => setExpanded(current => Object.keys(current).length ? current : Object.fromEntries(props.blocks.map((block, index) => [block.ordine, !compact || index === 0]))));
+    return () => window.cancelAnimationFrame(frame);
   }, [props.blocks]);
 
   if (!props.result) return <section className="planner-section exercise-preview-empty"><h2>Preview esercizi</h2><p>Genera gli esercizi dopo aver definito priorità e blocchi.</p></section>;

@@ -244,7 +244,8 @@ export type CalendarDay = {
 };
 
 export type AppSettings = {
-  id: "default";
+  id: string;
+  owner_id?: string;
   coach_name: string;
   account_email: string;
   phone: string | null;
