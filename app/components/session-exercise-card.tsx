@@ -1,7 +1,8 @@
 "use client";
 
 import type { SessionDisplayExercise } from "../../lib/session-visualization";
-import { getQuickCoachingPoints, getSessionExerciseImage } from "../../lib/session-visualization";
+import { getQuickCoachingPoints } from "../../lib/session-visualization";
+import { ExerciseTacticalBoard } from "./exercise-tactical-board";
 
 type Props = {
   item: SessionDisplayExercise;
@@ -21,11 +22,10 @@ type Props = {
 
 export function SessionExerciseCard(props: Props) {
   const { exercise } = props.item;
-  const image = getSessionExerciseImage(exercise);
   const coaching = getQuickCoachingPoints(exercise);
   return <article className={`session-exercise-card ${props.item.locked ? "locked" : ""}`}>
     <div className="session-exercise-media">
-      {image ? <img src={image} alt={`Schema tecnico ${exercise.nome}`} loading="lazy" /> : <div className="session-image-placeholder"><span>⌗</span><small>Schema non disponibile</small></div>}
+      {exercise.tactical_diagram ? <ExerciseTacticalBoard diagram={exercise.tactical_diagram} className="session-board" /> : <div className="session-image-placeholder"><span>⌗</span><small>Schema tattico da generare</small></div>}
       <span className="session-exercise-number">{props.number}</span>
     </div>
     <div className="session-exercise-content">

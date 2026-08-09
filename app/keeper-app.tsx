@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
-import type { AppSettings, CalendarDay, CalendarException, CatalogPhase, EditableExerciseSelection, EditableGeneratedSession, Exercise, ExerciseCategory, ExerciseDifficulty, ExercisePhysicalObjective, ExerciseSubcategory, GenerationMode, Goalkeeper, PhysicalAssessmentDimension, PhysicalObjective, PriorityRankingItem, ScoredExerciseCandidate, Season, SeasonMatch, SeasonPhaseConfig, SeasonRecallPeriod, SeasonTrainingProfile, SessionBlock, SessionProfile, SessionQualityResult, Training, TrainingExerciseVariant } from "../lib/types";
+import type { AppSettings, CalendarDay, CalendarException, CatalogPhase, DiagramSource, EditableExerciseSelection, EditableGeneratedSession, Exercise, ExerciseCategory, ExerciseDifficulty, ExercisePhysicalObjective, ExerciseSubcategory, GenerationMode, Goalkeeper, PhysicalAssessmentDimension, PhysicalObjective, PriorityRankingItem, ScoredExerciseCandidate, Season, SeasonMatch, SeasonPhaseConfig, SeasonRecallPeriod, SeasonTrainingProfile, SessionBlock, SessionProfile, SessionQualityResult, TacticalDiagram, Training, TrainingExerciseVariant } from "../lib/types";
 import { deleteExerciseImage, isAcceptedExerciseImage, parseExerciseImageName, uploadExerciseImage, type ExerciseImageKind } from "../lib/exercise-images";
 import { ExerciseCard } from "./components/exercise-card";
 import { BulkImageImportModal, ExerciseImageField, type BulkImageSummary } from "./components/exercise-image-tools";
@@ -21,6 +21,8 @@ import { SessionExerciseCard } from "./components/session-exercise-card";
 import { SessionFieldMode } from "./components/session-field-mode";
 import { SessionOverviewHeader } from "./components/session-overview-header";
 import { groupSessionExercises, type SessionDisplayExercise } from "../lib/session-visualization";
+import { generateTacticalDiagram, normalizeTacticalDiagram } from "../lib/tactical-diagram";
+import { TacticalDiagramEditor } from "./components/tactical-diagram-editor";
 
 type Section = "archive" | "builder" | "agenda" | "physical" | "goalkeepers";
 type ExerciseDraft = Omit<Exercise, "id" | "category" | "subcategory" | "physical_mappings">;
@@ -35,6 +37,7 @@ const emptyExercise: ExerciseDraft = {
   schema_step_6: null,
   scenario_gara: null, numero_azioni: null,
   schema_url: null, foto_url: null, attivo: true,
+  tactical_diagram: null, diagram_source: null, diagram_updated_at: null,
 };
 
 const catalogPhases: CatalogPhase[] = ["Analitico", "Disturbo", "Situazionale", "Integrato guidato", "Integrato variabile", "Situazionale complesso", "Scenario aperto"];
@@ -127,6 +130,9 @@ function normalizeExercise(record: Record<string, unknown>): Exercise {
     numero_azioni: record.numero_azioni ? String(record.numero_azioni) : null,
     schema_url: (record.schema_url ?? record.immagine_url ?? null) as string | null,
     foto_url: (record.foto_url ?? null) as string | null,
+    tactical_diagram: normalizeTacticalDiagram(record.tactical_diagram),
+    diagram_source: (["automatic", "manual", "automatic_edited"].includes(String(record.diagram_source)) ? record.diagram_source : null) as DiagramSource | null,
+    diagram_updated_at: record.diagram_updated_at ? String(record.diagram_updated_at) : null,
     category: category ?? undefined,
     subcategory: subcategory ?? undefined,
     physical_mappings: physicalMappings,
@@ -191,6 +197,8 @@ export function KeeperApp() {
   const [sessionExerciseDetail, setSessionExerciseDetail] = useState<{ exercise: Exercise; plannedDuration: number; variants: TrainingExerciseVariant[] } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [bulkImageOpen, setBulkImageOpen] = useState(false);
+  const [bulkDiagramOpen, setBulkDiagramOpen] = useState(false);
+  const [catalogAdmin, setCatalogAdmin] = useState(false);
   const [seasonSettingsOpen, setSeasonSettingsOpen] = useState(false);
   const [openCalendarDay, setOpenCalendarDay] = useState<CalendarDay | null>(null);
 
@@ -301,6 +309,12 @@ export function KeeperApp() {
     setKeepers(next.default_goalkeeper_count);
   }, []);
 
+  const loadCatalogAccess = useCallback(async () => {
+    if (!supabase) return;
+    const { data } = await supabase.rpc("is_catalog_admin");
+    setCatalogAdmin(data === true);
+  }, []);
+
   const loadSeasonCalendar = useCallback(async () => {
     if (!supabase) return;
     const seasonResult = await supabase.from("seasons").select("*").eq("attiva", true).maybeSingle();
@@ -333,10 +347,10 @@ export function KeeperApp() {
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      void Promise.all([loadCatalog(), loadExercises(), loadPhysicalObjectives(), loadGoalkeepers(), loadTrainings(), loadSettings(), loadSeasonCalendar()]).finally(() => setLoading(false));
+      void Promise.all([loadCatalog(), loadExercises(), loadPhysicalObjectives(), loadGoalkeepers(), loadTrainings(), loadSettings(), loadSeasonCalendar(), loadCatalogAccess()]).finally(() => setLoading(false));
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [loadCatalog, loadExercises, loadPhysicalObjectives, loadGoalkeepers, loadTrainings, loadSettings, loadSeasonCalendar]);
+  }, [loadCatalog, loadExercises, loadPhysicalObjectives, loadGoalkeepers, loadTrainings, loadSettings, loadSeasonCalendar, loadCatalogAccess]);
 
   useEffect(() => {
     if (!toast) return;
@@ -801,6 +815,23 @@ export function KeeperApp() {
     setToast("Esercizio disattivato");
   }
 
+  async function generateMissingTacticalDiagrams(onProgress: (processed: number, total: number, errors: string[]) => void) {
+    if (!supabase || !catalogAdmin) return { processed: 0, generated: 0, errors: ["Operazione riservata all’amministratore del catalogo"] };
+    const missing = exercises.filter(exercise => !exercise.tactical_diagram);
+    const errors: string[] = [];
+    let generated = 0;
+    for (let index = 0; index < missing.length; index += 1) {
+      const exercise = missing[index];
+      const { data, error } = await supabase.from("exercises").update({ tactical_diagram: generateTacticalDiagram(exercise), diagram_source: "automatic", diagram_updated_at: new Date().toISOString() }).eq("id", exercise.id).is("tactical_diagram", null).select("id").maybeSingle();
+      if (error) errors.push(`${exercise.codice}: ${error.message}`);
+      else if (data) generated += 1;
+      onProgress(index + 1, missing.length, [...errors]);
+    }
+    await loadExercises();
+    setToast(errors.length ? `Schemi generati con ${errors.length} errori` : `${generated} schemi tattici generati`);
+    return { processed: missing.length, generated, errors };
+  }
+
   async function saveGoalkeeper(draft: GoalkeeperDraft, id?: string) {
     if (!supabase) return false;
     const payload = { ...draft, nome: draft.nome.trim(), cognome: draft.cognome.trim(), data_nascita: draft.data_nascita || null, note: draft.note || null };
@@ -883,7 +914,7 @@ export function KeeperApp() {
         <header className="topbar"><span className="eyebrow">{settings.club_name ? `${settings.club_name} · ` : ""}{settings.team_name} · {settings.season}</span><div className="topbar-actions"><span className="online">● {isSupabaseConfigured ? "Supabase connesso" : "Configurazione mancante"}</span><button className="settings-button" aria-label="Apri impostazioni" title="Impostazioni" onClick={() => setSettingsOpen(true)}>⚙</button><button className="logout-button" aria-label="Esci dall’app" title="Esci" onClick={signOut}>↪</button></div></header>
         <div className="content">
           {loading ? <div className="loading-state">Caricamento archivio e agenda…</div> : null}
-          {!loading && section === "archive" && <Archive exercises={filtered} categories={exerciseCategories} subcategories={availableSubcategories} physicalObjectives={physicalObjectives} search={search} setSearch={setSearch} categoryFilter={categoryFilter} setCategoryFilter={value => { setCategoryFilter(value); setSubcategoryFilter("all"); }} subcategoryFilter={subcategoryFilter} setSubcategoryFilter={setSubcategoryFilter} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} intensityFilter={intensityFilter} setIntensityFilter={setIntensityFilter} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter} physicalObjectiveFilter={physicalObjectiveFilter} setPhysicalObjectiveFilter={setPhysicalObjectiveFilter} onNew={() => setEditingExercise("new")} onImportImages={() => setBulkImageOpen(true)} onOpen={setOpenExercise} onEdit={setEditingExercise} onDelete={deleteExercise} />}
+          {!loading && section === "archive" && <Archive exercises={filtered} categories={exerciseCategories} subcategories={availableSubcategories} physicalObjectives={physicalObjectives} search={search} setSearch={setSearch} categoryFilter={categoryFilter} setCategoryFilter={value => { setCategoryFilter(value); setSubcategoryFilter("all"); }} subcategoryFilter={subcategoryFilter} setSubcategoryFilter={setSubcategoryFilter} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} intensityFilter={intensityFilter} setIntensityFilter={setIntensityFilter} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter} physicalObjectiveFilter={physicalObjectiveFilter} setPhysicalObjectiveFilter={setPhysicalObjectiveFilter} onNew={() => setEditingExercise("new")} onImportImages={() => setBulkImageOpen(true)} onGenerateMissing={catalogAdmin ? () => setBulkDiagramOpen(true) : undefined} onOpen={setOpenExercise} onEdit={setEditingExercise} onDelete={deleteExercise} />}
           {!loading && section === "physical" && <PhysicalObjectivesPage objectives={physicalObjectives} />}
           {!loading && section === "goalkeepers" && <GoalkeepersPage goalkeepers={goalkeepers} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} onSaveGoalkeeper={saveGoalkeeper} onDeactivate={deactivateGoalkeeper} onSaveAssessment={saveGoalkeeperAssessment} />}
           {!loading && section === "builder" && <SessionPlanner editing={Boolean(editingTrainingId)} date={date} duration={duration} keepers={keepers} mode={generationMode} seasonPhase={seasonPhases.find(item=>date>=item.data_inizio&&date<=item.data_fine)?.tipo??"Non specificata"} profile={sessionProfile} goalkeepers={goalkeepers} selectedGoalkeeperIds={selectedGoalkeeperIds} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} technicalRanking={technicalRanking} physicalRanking={physicalRanking} technicalFocusId={technicalFocusId} technicalSecondaryFocusId={technicalSecondaryFocusId} physicalFocusId={physicalFocusId} blocks={sessionBlocks} generatedExercises={generatedExercises} quality={sessionQuality} confirmed={sessionConfirmed} onDate={value => { setDate(value); setGeneratedExercises(null); }} onDuration={value => { setDuration(value); setSessionProfile(null); setSessionBlocks([]); setGeneratedExercises(null); }} onKeepers={value => { setKeepers(value); setGeneratedExercises(null); }} onMode={setGenerationMode} onGoalkeepers={value => { setSelectedGoalkeeperIds(value); setGeneratedExercises(null); }} onTechnicalFocus={value => { setTechnicalFocusId(value); setGeneratedExercises(null); if (sessionProfile) setSessionBlocks(buildSessionBlocks(sessionProfile, value, physicalFocusId)); }} onTechnicalSecondaryFocus={value => { setTechnicalSecondaryFocusId(value); setGeneratedExercises(null); }} onPhysicalFocus={value => { setPhysicalFocusId(value); setGeneratedExercises(null); if (sessionProfile) setSessionBlocks(buildSessionBlocks(sessionProfile, technicalFocusId, value)); }} onBlocks={value => { setSessionBlocks(value); setGeneratedExercises(null); }} onGenerate={generateSessionPlan} onGenerateExercises={generateExercisePlan} onOpenExercise={(exercise,plannedDuration,variants)=>setSessionExerciseDetail({exercise:exercises.find(item=>item.id===exercise.id)??exercise,plannedDuration,variants})} onToggleLock={toggleExerciseLock} onExerciseDuration={changePlannedDuration} onRemove={removeGeneratedExercise} onReplace={openReplacement} onVariants={openVariants} onMove={moveGeneratedExercise} onRegenerateBlock={regenerateOneBlock} onRegenerateSession={regenerateAllExercises} onRecalculateAll={recalculateWholeSession} onAdd={setManualPickerBlock} onConfirm={()=>setSessionConfirmed(true)} onSave={saveSession} />}
@@ -898,6 +929,7 @@ export function KeeperApp() {
       {editingExercise && <ExerciseImageModal exercise={editingExercise === "new" ? null : editingExercise} categories={exerciseCategories} subcategories={exerciseSubcategories} physicalObjectives={physicalObjectives} onClose={() => setEditingExercise(null)} onSave={saveExercise} onImageChange={changeExerciseImage} onSavePhysicalMapping={saveExercisePhysicalMapping} onRemovePhysicalMapping={removeExercisePhysicalMapping} />}
       {openExercise && <ExerciseDetailModal exercise={openExercise} onClose={() => setOpenExercise(null)} onEdit={() => { setOpenExercise(null); setEditingExercise(openExercise); }} />}
       {bulkImageOpen && <BulkImageImportModal onClose={() => setBulkImageOpen(false)} onImport={importExerciseImages} />}
+      {bulkDiagramOpen && <BulkDiagramGenerationModal total={exercises.filter(exercise => !exercise.tactical_diagram).length} onClose={() => setBulkDiagramOpen(false)} onGenerate={generateMissingTacticalDiagrams} />}
       {openTraining && <PlannerTrainingModal training={openTraining} catalog={exercises} goalkeepers={goalkeepers} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} seasonPhases={seasonPhases} onOpenExercise={(exercise,plannedDuration,variants)=>setSessionExerciseDetail({exercise,plannedDuration,variants})} onClose={() => setOpenTraining(null)} onEdit={() => startEditTraining(openTraining)} onDelete={() => deleteTraining(openTraining)} />}
       {sessionExerciseDetail && <ExerciseDetailModal exercise={sessionExerciseDetail.exercise} plannedDuration={sessionExerciseDetail.plannedDuration} variants={sessionExerciseDetail.variants} goalkeepers={goalkeepers} onClose={() => setSessionExerciseDetail(null)} onEdit={() => { setSessionExerciseDetail(null); setOpenTraining(null); setEditingExercise(sessionExerciseDetail.exercise); }} />}
       {openCalendarDay && <CalendarDayModal day={openCalendarDay} trainings={trainings.filter(training => training.training_date === openCalendarDay.data)} onClose={() => setOpenCalendarDay(null)} onOpenTraining={training => { setOpenCalendarDay(null); setOpenTraining(training); }} onSaveException={saveCalendarException} />}
@@ -913,7 +945,7 @@ function PageHead({ eyebrow, title, subtitle, action }: { eyebrow: string; title
   return <div className="page-head"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p className="subtitle">{subtitle}</p></div>{action}</div>;
 }
 
-type ArchiveProps = { exercises: Exercise[]; categories: ExerciseCategory[]; subcategories: string[]; physicalObjectives: PhysicalObjective[]; search: string; setSearch: (value: string) => void; categoryFilter: number | "all"; setCategoryFilter: (value: number | "all") => void; subcategoryFilter: string | "all"; setSubcategoryFilter: (value: string | "all") => void; phaseFilter: CatalogPhase | "all"; setPhaseFilter: (value: CatalogPhase | "all") => void; intensityFilter: Exercise["intensita"] | "all"; setIntensityFilter: (value: Exercise["intensita"] | "all") => void; difficultyFilter: ExerciseDifficulty | "all"; setDifficultyFilter: (value: ExerciseDifficulty | "all") => void; physicalObjectiveFilter: string | "all"; setPhysicalObjectiveFilter: (value: string | "all") => void; onNew: () => void; onImportImages: () => void; onOpen: (exercise: Exercise) => void; onEdit: (exercise: Exercise) => void; onDelete: (exercise: Exercise) => void };
+type ArchiveProps = { exercises: Exercise[]; categories: ExerciseCategory[]; subcategories: string[]; physicalObjectives: PhysicalObjective[]; search: string; setSearch: (value: string) => void; categoryFilter: number | "all"; setCategoryFilter: (value: number | "all") => void; subcategoryFilter: string | "all"; setSubcategoryFilter: (value: string | "all") => void; phaseFilter: CatalogPhase | "all"; setPhaseFilter: (value: CatalogPhase | "all") => void; intensityFilter: Exercise["intensita"] | "all"; setIntensityFilter: (value: Exercise["intensita"] | "all") => void; difficultyFilter: ExerciseDifficulty | "all"; setDifficultyFilter: (value: ExerciseDifficulty | "all") => void; physicalObjectiveFilter: string | "all"; setPhysicalObjectiveFilter: (value: string | "all") => void; onNew: () => void; onImportImages: () => void; onGenerateMissing?: () => void; onOpen: (exercise: Exercise) => void; onEdit: (exercise: Exercise) => void; onDelete: (exercise: Exercise) => void };
 function Archive(props: ArchiveProps) {
   const hasActiveFilters = props.search !== "" || props.categoryFilter !== "all" || props.subcategoryFilter !== "all" || props.phaseFilter !== "all" || props.intensityFilter !== "all" || props.difficultyFilter !== "all" || props.physicalObjectiveFilter !== "all";
   const resetFilters = () => {
@@ -927,7 +959,7 @@ function Archive(props: ArchiveProps) {
   };
 
   return <>
-    <PageHead eyebrow="Catalogo tecnico ufficiale" title="Archivio esercizi" subtitle={`${props.exercises.length} esercizi nella selezione corrente.`} action={<div className="page-actions"><button className="secondary" onClick={props.onImportImages}>⇧ Importa immagini</button><button className="primary" onClick={props.onNew}>+ Nuovo esercizio</button></div>} />
+    <PageHead eyebrow="Catalogo tecnico ufficiale" title="Archivio esercizi" subtitle={`${props.exercises.length} esercizi nella selezione corrente.`} action={<div className="page-actions">{props.onGenerateMissing && <button className="secondary" onClick={props.onGenerateMissing}>Genera schemi mancanti</button>}<button className="secondary" onClick={props.onImportImages}>⇧ Importa immagini</button><button className="primary" onClick={props.onNew}>+ Nuovo esercizio</button></div>} />
     <section className="archive-filter-panel" aria-labelledby="archive-filters-title">
       <div className="archive-filter-head">
         <div className="archive-filter-heading"><span className="archive-filter-icon">⌕</span><div><h2 id="archive-filters-title">Cerca e filtra</h2><p>Restringi il catalogo usando uno o più criteri tecnici.</p></div></div>
@@ -947,11 +979,21 @@ function Archive(props: ArchiveProps) {
       </div>
     </section>
     {!props.exercises.length ? <EmptyState title="Nessun esercizio trovato" text="Modifica i filtri oppure aggiungi un nuovo esercizio." action={<button className="primary" onClick={props.onNew}>Aggiungi esercizio</button>} /> : null}
-    <div className="exercise-grid technical-grid">{props.exercises.map(exercise => <ExerciseCard key={exercise.id} exercise={exercise} onOpen={props.onOpen} onEdit={props.onEdit} onDeactivate={props.onDelete} />)}</div>
+    <div className="exercise-grid technical-grid">{props.exercises.map(exercise => <ExerciseCard key={exercise.id} exercise={exercise} onOpen={props.onOpen} onEdit={props.onEdit} onDeactivate={props.onDelete} canGenerate={Boolean(props.onGenerateMissing)} />)}</div>
   </>;
 }
 
 type BuilderProps = { editing: boolean; date: string; setDate: (value: string) => void; duration: number; setDuration: (value: number) => void; keepers: number; setKeepers: (value: number) => void; objectives: string[]; selectedObjectives: string[]; setSelectedObjectives: (value: string[]) => void; physicalObjectives: PhysicalObjective[]; selectedPhysicalObjectiveId: string; setSelectedPhysicalObjectiveId: (value: string) => void; session: Exercise[]; totalMinutes: number; onGenerate: () => void; onSwap: (index: number) => void; onSave: () => void };
+function BulkDiagramGenerationModal({ total, onClose, onGenerate }: { total: number; onClose: () => void; onGenerate: (onProgress: (processed: number, total: number, errors: string[]) => void) => Promise<{ processed: number; generated: number; errors: string[] }> }) {
+  const [running, setRunning] = useState(false);
+  const [processed, setProcessed] = useState(0);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [generated, setGenerated] = useState<number | null>(null);
+  async function start() { setRunning(true); const result = await onGenerate((next, _total, nextErrors) => { setProcessed(next); setErrors(nextErrors); }); setGenerated(result.generated); setRunning(false); }
+  const percent = total ? Math.round(processed / total * 100) : 100;
+  return <div className="modal-backdrop" onClick={running ? undefined : onClose}><section className="modal bulk-diagram-modal" role="dialog" aria-modal="true" aria-labelledby="bulk-diagram-title" onClick={event => event.stopPropagation()}><button type="button" className="modal-close" disabled={running} onClick={onClose} aria-label="Chiudi">×</button><span className="eyebrow">Catalogo amministratore</span><h2 id="bulk-diagram-title">Genera schemi mancanti</h2><p>Verranno elaborati soltanto i {total} esercizi senza schema. Gli schemi manuali o già generati non saranno sovrascritti.</p><div className="bulk-diagram-progress" aria-live="polite"><div><span style={{ width: `${percent}%` }} /></div><strong>{processed} / {total}</strong></div>{generated !== null && <div className="bulk-diagram-result"><strong>{generated} schemi creati</strong><span>{errors.length} errori</span></div>}{errors.length > 0 && <details open><summary>Errori ({errors.length})</summary><ul>{errors.map(error => <li key={error}>{error}</li>)}</ul></details>}<div className="modal-actions"><button type="button" className="secondary" disabled={running} onClick={onClose}>Chiudi</button><button type="button" className="primary" disabled={running || total === 0 || generated !== null} onClick={start}>{running ? `Generazione ${percent}%…` : "Avvia generazione"}</button></div></section></div>;
+}
+
 function Builder(props: BuilderProps) {
   const selectedPhysical = props.physicalObjectives.find(item => item.id === props.selectedPhysicalObjectiveId);
   const selectedPhysicalLabel = selectedPhysical ? `${selectedPhysical.macro_area} > ${selectedPhysical.obiettivo_fisico}` : "";
@@ -1025,6 +1067,7 @@ function ExerciseImageModal({ exercise, categories, subcategories, physicalObjec
   const [imageBusy, setImageBusy] = useState<ExerciseImageKind | null>(null);
   const [saving, setSaving] = useState(false);
   const [mappingBusyId, setMappingBusyId] = useState<string | null>(null);
+  const [diagramEditor, setDiagramEditor] = useState<{ diagram: TacticalDiagram; origin: "automatic" | "edit" } | null>(null);
   const validSubcategories = subcategories.filter(item => item.category_id === draft.category_id && item.fase === draft.fase);
   const set = <K extends keyof ExerciseDraft>(key: K, value: ExerciseDraft[K]) => setDraft(current => ({ ...current, [key]: value }));
 
@@ -1087,6 +1130,19 @@ function ExerciseImageModal({ exercise, categories, subcategories, physicalObjec
     finally { setMappingBusyId(null); }
   }
 
+  function exerciseForDiagram(): Exercise {
+    return { ...draft, id: exercise?.id ?? "preview", category: exercise?.category, subcategory: exercise?.subcategory, physical_mappings: exercise?.physical_mappings };
+  }
+
+  function generateDiagramPreview() {
+    if (draft.tactical_diagram && !window.confirm("Sostituire l’attuale schema tattico con una nuova proposta automatica?")) return;
+    setDiagramEditor({ diagram: generateTacticalDiagram(exerciseForDiagram()), origin: "automatic" });
+  }
+
+  function editDiagram() {
+    setDiagramEditor({ diagram: draft.tactical_diagram ?? generateTacticalDiagram(exerciseForDiagram()), origin: draft.tactical_diagram ? "edit" : "automatic" });
+  }
+
   return <div className="modal-backdrop"><form className="modal exercise-form-modal" onSubmit={submit}>
     <button type="button" className="modal-close" onClick={onClose}>×</button>
     <span className="eyebrow">Catalogo esercizi</span><h2>{exercise ? "Modifica esercizio" : "Nuovo esercizio"}</h2>
@@ -1115,6 +1171,12 @@ function ExerciseImageModal({ exercise, categories, subcategories, physicalObjec
       <div className="field full procedure-fields"><label>Svolgimento · Passaggio 6</label><textarea rows={2} value={draft.schema_step_6 ?? ""} onChange={event => set("schema_step_6", event.target.value || null)} /></div>
       {draft.categoria === "Match Simulation" && <><div className="field full"><label>Scenario gara</label><textarea rows={3} value={draft.scenario_gara ?? ""} onChange={event => set("scenario_gara", event.target.value || null)} /></div><div className="field"><label>Numero azioni</label><input value={draft.numero_azioni ?? ""} onChange={event => set("numero_azioni", event.target.value || null)} /></div></>}
       {exercise && <ExercisePhysicalObjectivesEditor mappings={exercise.physical_mappings ?? []} objectives={physicalObjectives} busyId={mappingBusyId} onSave={savePhysicalMapping} onRemove={removePhysicalMapping} />}
+      <section className="tactical-diagram-form-section field full">
+        <div><span className="eyebrow">Schema dinamico</span><h3>Schema tattico dell’esercizio</h3><p>Generato dai dati tecnici e modificabile con mouse, touch o tastiera.</p></div>
+        <div className="tactical-diagram-form-actions"><button type="button" className="secondary" onClick={generateDiagramPreview}>Genera schema automaticamente</button><button type="button" className="secondary" onClick={editDiagram}>{draft.tactical_diagram ? "Modifica schema" : "Crea schema manuale"}</button></div>
+        {draft.tactical_diagram && <div className="diagram-status"><span>Schema presente</span><small>Origine: {draft.diagram_source === "automatic" ? "automatico" : draft.diagram_source === "automatic_edited" ? "automatico modificato" : "manuale"}</small></div>}
+      </section>
+      {diagramEditor && <div className="field full"><TacticalDiagramEditor exercise={exerciseForDiagram()} value={diagramEditor.diagram} onCancel={() => setDiagramEditor(null)} onSave={diagram => { const automatic = diagramEditor.origin === "automatic"; setDraft(current => ({ ...current, tactical_diagram: diagram, diagram_source: automatic ? "automatic" : current.diagram_source === "automatic" ? "automatic_edited" : "manual", diagram_updated_at: new Date().toISOString() })); setDiagramEditor(null); }} /></div>}
       <section className="exercise-images-section field full"><div className="exercise-images-title"><span>Immagini esercizio</span><small>WEBP, JPG, JPEG o PNG · salvataggio nello Storage Supabase</small></div><div className="exercise-images-grid">
         <ExerciseImageField label="Schema tecnico" kind="schema" url={draft.schema_url} selectedFile={schemaImage} busy={imageBusy === "schema"} immediate={Boolean(exercise)} onSelect={setSchemaImage} onUpload={file => uploadImage("schema", file)} onDelete={() => removeImage("schema")} />
         <ExerciseImageField label="Foto dimostrativa" kind="foto" url={draft.foto_url} selectedFile={photoImage} busy={imageBusy === "foto"} immediate={Boolean(exercise)} onSelect={setPhotoImage} onUpload={file => uploadImage("foto", file)} onDelete={() => removeImage("foto")} />

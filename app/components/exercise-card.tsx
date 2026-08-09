@@ -1,6 +1,7 @@
 "use client";
 
 import type { Exercise } from "../../lib/types";
+import { ExerciseTacticalBoard } from "./exercise-tactical-board";
 
 const physicalRoleOrder = { Principale: 0, Secondario: 1, Complementare: 2 } as const;
 
@@ -11,11 +12,12 @@ type ExerciseCardProps = {
   onDeactivate: (exercise: Exercise) => void;
   showActions?: boolean;
   variant?: "compact" | "detail";
+  canGenerate?: boolean;
 };
 
-function MediaPanel({ url, label, kind }: { url: string | null; label: string; kind: "schema" | "foto" }) {
-  if (url) return <div className={`manual-media ${kind}`}><img src={url} alt={`${label} dell’esercizio`} loading="lazy" /></div>;
-  return <div className={`manual-media manual-placeholder ${kind}`}><span>{kind === "schema" ? "⌗" : "◉"}</span><strong>{label}</strong><small>Immagine non disponibile</small></div>;
+function DiagramPanel({ exercise, compact = false, onGenerate }: { exercise: Exercise; compact?: boolean; onGenerate?: () => void }) {
+  if (exercise.tactical_diagram) return <ExerciseTacticalBoard diagram={exercise.tactical_diagram} className={compact ? "compact-board" : "detail-board"} />;
+  return <div className="manual-media manual-placeholder schema tactical-placeholder"><span>⌗</span><strong>Schema tecnico non ancora generato</strong><small>Apri Modifica per creare lo schema dinamico.</small>{onGenerate && <button type="button" className="secondary compact" onClick={event => { event.stopPropagation(); onGenerate(); }}>Genera schema</button>}</div>;
 }
 
 function BulletList({ value, fallback }: { value: string; fallback: string }) {
@@ -41,14 +43,14 @@ function PhysicalComponents({ exercise }: { exercise: Exercise }) {
   </section>;
 }
 
-export function ExerciseCard({ exercise, onOpen, onEdit, onDeactivate, showActions = true, variant = "compact" }: ExerciseCardProps) {
+export function ExerciseCard({ exercise, onOpen, onEdit, onDeactivate, showActions = true, variant = "compact", canGenerate = false }: ExerciseCardProps) {
   const procedureSteps = [exercise.schema_step_1, exercise.schema_step_2, exercise.schema_step_3, exercise.schema_step_4, exercise.schema_step_5, exercise.schema_step_6].filter((step): step is string => Boolean(step));
   const phase = exercise.fase || "Analitico";
   const phaseClass = phase.toLowerCase();
 
   if (variant === "compact") return <article className="technical-card catalog-card">
     <div className="catalog-card-visual">
-      <MediaPanel url={exercise.schema_url} label="Schema tecnico" kind="schema" />
+      <DiagramPanel exercise={exercise} compact onGenerate={canGenerate ? () => onEdit(exercise) : undefined} />
       <span className={`phase-pill ${phaseClass}`}>{phase}</span>
     </div>
     <div className="catalog-card-body">
@@ -74,7 +76,7 @@ export function ExerciseCard({ exercise, onOpen, onEdit, onDeactivate, showActio
 
     <section className="manual-visual-section">
       <div className="manual-media-split schema-only">
-        <div className="manual-media-column"><div className="manual-section-label">Schema tecnico</div><MediaPanel url={exercise.schema_url} label="Schema tecnico" kind="schema" /></div>
+        <div className="manual-media-column"><div className="manual-section-label">Schema tattico</div><DiagramPanel exercise={exercise} /></div>
       </div>
       <div className="manual-legend"><h3>Descrizione</h3><p>{exercise.descrizione}</p></div>
       {procedureSteps.length > 0 && <div className="manual-procedure"><h3>Svolgimento</h3><ol>{procedureSteps.map((step, index) => <li key={`${exercise.codice}-detail-step-${index + 1}`}>{step}</li>)}</ol></div>}

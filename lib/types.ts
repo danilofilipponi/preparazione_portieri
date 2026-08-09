@@ -8,6 +8,42 @@ export type CatalogPhase = "Analitico" | "Disturbo" | "Situazionale" | "Integrat
 export type MethodologicalPhase = CatalogPhase | "Generale";
 export type ExerciseIntensity = "Bassa" | "Bassa-Media" | "Media" | "Media-Alta" | "Alta";
 export type ExerciseDifficulty = 1 | 2 | 3 | 4 | 5;
+export type TacticalViewType = "front_goal" | "half_pitch" | "penalty_area" | "full_pitch";
+export type TacticalElementType = "goalkeeper" | "coach" | "attacker" | "player" | "ball" | "cone" | "mannequin" | "hurdle" | "mini_goal" | "goal" | "marker";
+export type TacticalActionType = "movimento" | "passaggio" | "tiro" | "cross" | "tuffo" | "recupero" | "corsa" | "conduzione";
+export type DiagramSource = "automatic" | "manual" | "automatic_edited";
+
+export type TacticalDiagramElement = {
+  id: string;
+  type: TacticalElementType;
+  x: number;
+  y: number;
+  rotation: number;
+  scale: number;
+  label?: string;
+  role?: string;
+};
+
+export type TacticalDiagramAction = {
+  id: string;
+  type: TacticalActionType;
+  fromElementId?: string;
+  toElementId?: string;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  sequence: number;
+  style?: "solid" | "dashed" | "curved";
+  label?: string;
+};
+
+export type TacticalDiagram = {
+  version: 1;
+  canvas: { viewType: TacticalViewType; widthRatio: number; heightRatio: number };
+  elements: TacticalDiagramElement[];
+  actions: TacticalDiagramAction[];
+};
 export type PhysicalPriority = "Molto alta" | "Alta" | "Media" | "Bassa";
 export type SeasonalSuitability = PhysicalPriority | "Non prevista";
 export type SeasonPhase = "precampionato" | "periodo_competitivo" | "richiamo_mantenimento" | "recupero_rigenerazione";
@@ -79,6 +115,9 @@ export type Exercise = {
   numero_azioni: string | null;
   schema_url: string | null;
   foto_url: string | null;
+  tactical_diagram?: TacticalDiagram | null;
+  diagram_source?: DiagramSource | null;
+  diagram_updated_at?: string | null;
   attivo: boolean;
   category?: ExerciseCategory;
   subcategory?: ExerciseSubcategory;
