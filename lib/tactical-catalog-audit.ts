@@ -28,10 +28,10 @@ const text=(exercise:Exercise)=>[exercise.nome,exercise.categoria,exercise.sotto
 export function auditTags(exercise:Exercise){const value=text(exercise);return equipmentPatterns.filter(([,pattern])=>pattern.test(value)).map(([tag])=>tag);}
 
 export function selectCatalogAuditSample(exercises:Exercise[],limit=30){
-  const pool=exercises.filter(item=>item.attivo).slice().sort((a,b)=>a.codice.localeCompare(b.codice)),selected:Exercise[]=[],families=new Map<string,number>(),categories=new Map<string,number>(),tags=new Map<string,number>();
-  while(selected.length<Math.min(limit,pool.length)){
+  const pool=exercises.filter(item=>item.attivo).slice().sort((a,b)=>a.codice.localeCompare(b.codice)),target=Math.min(limit,pool.length),selected:Exercise[]=[],families=new Map<string,number>(),categories=new Map<string,number>(),tags=new Map<string,number>();
+  while(selected.length<target){
     let bestIndex=0,bestScore=-Infinity;
-    pool.forEach((item,index)=>{const family=classifyTacticalFamily(item),itemTags=auditTags(item),steps=[item.descrizione,item.schema_step_1,item.schema_step_2,item.schema_step_3].filter(Boolean).length;const score=(families.get(family)??0)===0?40:12/(1+(families.get(family)??0))+(categories.get(item.categoria)??0)===0?22:8/(1+(categories.get(item.categoria)??0))+itemTags.reduce((sum,tag)=>sum+((tags.get(tag)??0)===0?14:4/(1+(tags.get(tag)??0))),0)+Math.min(8,steps*2)+(item.materiale?3:0);if(score>bestScore){bestScore=score;bestIndex=index;}});
+    pool.forEach((item,index)=>{const family=classifyTacticalFamily(item),itemTags=auditTags(item),steps=[item.descrizione,item.schema_step_1,item.schema_step_2,item.schema_step_3].filter(Boolean).length;const familyScore=(families.get(family)??0)===0?40:12/(1+(families.get(family)??0)),categoryScore=(categories.get(item.categoria)??0)===0?22:8/(1+(categories.get(item.categoria)??0)),tagScore=itemTags.reduce((sum,tag)=>sum+((tags.get(tag)??0)===0?14:4/(1+(tags.get(tag)??0))),0),score=familyScore+categoryScore+tagScore+Math.min(8,steps*2)+(item.materiale?3:0);if(score>bestScore){bestScore=score;bestIndex=index;}});
     const [chosen]=pool.splice(bestIndex,1),family=classifyTacticalFamily(chosen);selected.push(chosen);families.set(family,(families.get(family)??0)+1);categories.set(chosen.categoria,(categories.get(chosen.categoria)??0)+1);for(const tag of auditTags(chosen))tags.set(tag,(tags.get(tag)??0)+1);
   }
   return selected;
