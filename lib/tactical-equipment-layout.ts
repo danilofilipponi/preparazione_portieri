@@ -1,12 +1,13 @@
-import type { DiagramSource, TacticalDiagram, TacticalDiagramAction, TacticalDiagramElement, TacticalElementType } from "./types.ts";
+import type { DiagramSource, TacticalDiagram, TacticalDiagramElement, TacticalElementType } from "./types.ts";
 import type { TacticalSetupRequirement } from "./tactical-setup-validation.ts";
+import { classifyTacticalCollisions, summarizeTacticalCollisions } from "./tactical-collisions.ts";
 import { TACTICAL_MINIMUM_DISPLAY_SCALE, TACTICAL_VISUAL_SCALE } from "./tactical-visual-scale.ts";
 
 type Point={x:number;y:number};
 export type TacticalLayoutDensity="LOW"|"MEDIUM"|"HIGH";
 export type TacticalLayoutZoneName="START"|"PATH"|"ACTION"|"TARGET";
 export type TacticalLayoutZone={name:TacticalLayoutZoneName;x:number;y:number;width:number;height:number};
-export type TacticalLayoutValidation={valid:boolean;warnings:string[];metrics:{excessiveOverlap:number;excessiveDensity:boolean;pathTooCompressed:boolean;actionCollision:number;unreadableBall:boolean}};
+export type TacticalLayoutValidation={valid:boolean;warnings:string[];metrics:{excessiveOverlap:number;excessiveDensity:boolean;pathTooCompressed:boolean;actionCollision:number;expectedIntersection:number;visualInterference:number;realCollision:number;unreadableBall:boolean}};
 export type TacticalEquipmentLayoutResult={diagram:TacticalDiagram;density:TacticalLayoutDensity;zones:TacticalLayoutZone[];validation:TacticalLayoutValidation;adjustments:string[]};
 
 export const EQUIPMENT_MIN_DISTANCE=Object.freeze({
@@ -32,7 +33,6 @@ const humanTypes=new Set<TacticalElementType>(["goalkeeper","attacker","player",
 const clamp=(value:number,min=7,max=93)=>Math.max(min,Math.min(max,value));
 const clone=(diagram:TacticalDiagram):TacticalDiagram=>({...diagram,canvas:{...diagram.canvas},elements:diagram.elements.map(item=>({...item})),actions:diagram.actions.map(item=>({...item}))});
 const distance=(a:Point,b:Point)=>Math.hypot(a.x-b.x,a.y-b.y);
-const pointSegmentDistance=(point:Point,action:TacticalDiagramAction)=>{const dx=action.endX-action.startX,dy=action.endY-action.startY,length=dx*dx+dy*dy;if(!length)return distance(point,{x:action.startX,y:action.startY});const t=Math.max(0,Math.min(1,((point.x-action.startX)*dx+(point.y-action.startY)*dy)/length));return distance(point,{x:action.startX+t*dx,y:action.startY+t*dy});};
 
 export function calculateTacticalLayoutDensity(diagram:TacticalDiagram):TacticalLayoutDensity{
   const equipment=diagram.elements.filter(item=>equipmentTypes.has(item.type)).length;
@@ -69,19 +69,17 @@ function syncLinkedActions(diagram:TacticalDiagram){
 }
 
 export function validateEquipmentLayout(diagram:TacticalDiagram,requirements:ReadonlyArray<TacticalSetupRequirement>,density=calculateTacticalLayoutDensity(diagram)):TacticalLayoutValidation{
-  const hasPathRelation=requirements.some(item=>item.relation==="slalom"||item.relation==="hurdle_sequence"),hasGate=requirements.some(item=>item.relation==="cone_gate");
   let excessiveOverlap=0;
   for(let left=0;left<diagram.elements.length;left+=1)for(let right=left+1;right<diagram.elements.length;right+=1){const first=diagram.elements[left],second=diagram.elements[right];if(!equipmentTypes.has(first.type)&&!equipmentTypes.has(second.type)&&first.type!=="ball"&&second.type!=="ball")continue;if(distance(first,second)<minimumDistance(first,second)*.72)excessiveOverlap+=1;}
   const pathRequirements=requirements.filter(item=>item.relation==="slalom"||item.relation==="hurdle_sequence");
   const pathTooCompressed=pathRequirements.some(requirement=>{const items=diagram.elements.filter(item=>item.type===requirement.type).slice(0,requirement.count);return items.some((item,index)=>index>0&&distance(item,items[index-1])<minimumDistance(item,items[index-1])*.9);});
   const xs=diagram.elements.map(item=>item.x),ys=diagram.elements.map(item=>item.y),area=xs.length?(Math.max(...xs)-Math.min(...xs))*(Math.max(...ys)-Math.min(...ys)):0;
   const excessiveDensity=density==="HIGH"&&area<1500;
-  let actionCollision=0;
-  for(const action of diagram.actions)for(const item of diagram.elements){if(item.id===action.fromElementId||item.id===action.toElementId)continue;if(item.type==="ball"||equipmentTypes.has(item.type)||humanTypes.has(item.type)){const endpointParticipant=humanTypes.has(item.type)&&Math.min(distance(item,{x:action.startX,y:action.startY}),distance(item,{x:action.endX,y:action.endY}))<8;const functionalPathItem=hasPathRelation&&(item.type==="marker"||item.type==="hurdle")||hasGate&&item.type==="cone"&&action.id.startsWith("validation-path-");const intentional=endpointParticipant||functionalPathItem||item.type==="mannequin"&&["tiro","passaggio"].includes(action.type);if(!intentional&&pointSegmentDistance(item,action)<3.2)actionCollision+=1;}}
+  const classified=classifyTacticalCollisions(diagram,requirements),collisionSummary=summarizeTacticalCollisions(classified),actionCollision=collisionSummary.VISUAL_INTERFERENCE+collisionSummary.REAL_COLLISION;
   const minimumBallScale=TACTICAL_MINIMUM_DISPLAY_SCALE.ball??0;
   const unreadableBall=diagram.elements.some(item=>item.type==="ball")&&(TACTICAL_VISUAL_SCALE.ball<.8||minimumBallScale<.72);
-  const warnings:string[]=[];if(excessiveOverlap)warnings.push(`${excessiveOverlap} sovrapposizioni eccessive`);if(excessiveDensity)warnings.push("Densità elevata concentrata in una zona ridotta");if(pathTooCompressed)warnings.push("Percorso troppo compresso");if(actionCollision)warnings.push(`${actionCollision} collisioni tra actions ed elementi non coinvolti`);if(unreadableBall)warnings.push("Pallone sotto la soglia minima di leggibilità");
-  return{valid:warnings.length===0,warnings,metrics:{excessiveOverlap,excessiveDensity,pathTooCompressed,actionCollision,unreadableBall}};
+  const warnings:string[]=[];if(excessiveOverlap)warnings.push(`${excessiveOverlap} sovrapposizioni eccessive`);if(excessiveDensity)warnings.push("Densità elevata concentrata in una zona ridotta");if(pathTooCompressed)warnings.push("Percorso troppo compresso");if(collisionSummary.VISUAL_INTERFERENCE)warnings.push(`${collisionSummary.VISUAL_INTERFERENCE} interferenze visive tra actions ed elementi non coinvolti`);if(collisionSummary.REAL_COLLISION)warnings.push(`${collisionSummary.REAL_COLLISION} collisioni reali`);if(unreadableBall)warnings.push("Pallone sotto la soglia minima di leggibilità");
+  return{valid:warnings.length===0,warnings,metrics:{excessiveOverlap,excessiveDensity,pathTooCompressed,actionCollision,expectedIntersection:collisionSummary.EXPECTED_INTERSECTION,visualInterference:collisionSummary.VISUAL_INTERFERENCE,realCollision:collisionSummary.REAL_COLLISION,unreadableBall}};
 }
 
 export function refineEquipmentLayout(diagram:TacticalDiagram,requirements:ReadonlyArray<TacticalSetupRequirement>,source:DiagramSource|null="automatic"):TacticalEquipmentLayoutResult{

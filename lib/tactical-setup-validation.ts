@@ -2,16 +2,19 @@ import type { DiagramSource, Exercise, TacticalDiagram, TacticalDiagramAction, T
 import { refineEquipmentLayout, type TacticalEquipmentLayoutResult } from "./tactical-equipment-layout.ts";
 
 export type TacticalSetupValidationStatus = "VALID" | "VALID_WITH_WARNINGS" | "NEEDS_REVIEW";
-export type TacticalSetupRelation = "cone_gate" | "cone_square" | "cone_diamond" | "corridor" | "start_cone" | "recovery_cone" | "marker_zone" | "slalom" | "mini_goal_target" | "lateral_targets" | "mannequin_gate" | "mannequin_screen" | "hurdle_sequence" | "ball_owner" | "second_ball_source" | "presence";
+export type TacticalSetupRelation = "cone_gate" | "cone_square" | "cone_diamond" | "corridor" | "start_cone" | "recovery_cone" | "marker_zone" | "slalom" | "mini_goal_target" | "lateral_targets" | "mannequin_gate" | "mannequin_screen" | "hurdle_sequence" | "ball_owner" | "second_ball_source" | "derived_second_ball" | "presence";
 
 export type TacticalSetupRequirement = { type:TacticalElementType; count:number; essential:boolean; relation:TacticalSetupRelation; reason:string };
 export type TacticalRelationValidation = { relation:TacticalSetupRelation; type:TacticalElementType; expected:string; generated:string; valid:boolean };
+export type TacticalEquipmentInventory = { type:TacticalElementType; declared:number; required:number; optional:number; rendered:number };
 export type TacticalSetupValidation = {
   status:TacticalSetupValidationStatus;
   diagram:TacticalDiagram;
   relevantData:string[];
   expectedElements:TacticalSetupRequirement[];
+  declaredElements:Partial<Record<TacticalElementType,number>>;
   generatedElements:Partial<Record<TacticalElementType,number>>;
+  equipmentInventory:TacticalEquipmentInventory[];
   expectedRelations:string[];
   generatedRelations:string[];
   elementValidation:{valid:boolean;issues:string[]};
@@ -22,6 +25,7 @@ export type TacticalSetupValidation = {
   layoutAdjustments:string[];
   issues:string[];
   warnings:string[];
+  infos:string[];
   repairs:string[];
 };
 
@@ -30,18 +34,55 @@ type Point={x:number;y:number};
 const humans=new Set<TacticalElementType>(["goalkeeper","coach","attacker","player"]);
 const numberWords:Record<string,number>={un:1,uno:1,una:1,due:2,tre:3,quattro:4,cinque:5,sei:6,sette:7,otto:8,nove:9,dieci:10};
 const countToken="10|[1-9]|un|uno|una|due|tre|quattro|cinque|sei|sette|otto|nove|dieci";
+const declaredCountToken="[1-9][0-9]?|un|uno|una|due|tre|quattro|cinque|sei|sette|otto|nove|dieci";
 
 function normalize(value:string|null|undefined){return(value??"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[’']/g," ").replace(/\s+/g," ").trim();}
-function relevantData(exercise:Exercise){return[exercise.nome,exercise.categoria,exercise.sottocategoria,exercise.obiettivo,exercise.descrizione,exercise.materiale,exercise.variante,exercise.schema_step_1,exercise.schema_step_2,exercise.schema_step_3,exercise.schema_step_4,exercise.schema_step_5,exercise.schema_step_6,exercise.scenario_gara].filter((value):value is string=>Boolean(value?.trim()));}
+function relevantData(exercise:Exercise){return[exercise.nome,exercise.categoria,exercise.sottocategoria,exercise.obiettivo,exercise.descrizione,exercise.variante,exercise.schema_step_1,exercise.schema_step_2,exercise.schema_step_3,exercise.schema_step_4,exercise.schema_step_5,exercise.schema_step_6,exercise.scenario_gara].filter((value):value is string=>Boolean(value?.trim()));}
 function setupText(exercise:Exercise){return normalize(relevantData(exercise).join(". "));}
 function asCount(value:string|undefined,fallback:number){if(!value)return fallback;if(/^\d+$/.test(value))return Math.max(1,Math.min(10,Number(value)));return numberWords[value]??fallback;}
+function asDeclaredCount(value:string|undefined,fallback:number){if(!value)return fallback;if(/^\d+$/.test(value))return Math.max(1,Math.min(99,Number(value)));return numberWords[value]??fallback;}
 function mentionedCount(text:string,nouns:string,fallback=1){const match=text.match(new RegExp(`(?:^|\\s)(${countToken})\\s+(?:${nouns})\\b`));return asCount(match?.[1],fallback);}
 function addRequirement(output:TacticalSetupRequirement[],item:TacticalSetupRequirement){const current=output.find(value=>value.type===item.type&&value.relation===item.relation);if(current){current.count=Math.max(current.count,item.count);current.essential=current.essential||item.essential;if(item.essential)current.reason=item.reason;}else output.push(item);}
+
+const declaredEquipmentPatterns:ReadonlyArray<[TacticalElementType,string,string]>=Object.freeze([
+  ["ball","palloni?|palle","Palloni"],
+  ["cone","coni?","Coni"],
+  ["marker","cinesini?|delimitatori?|markers?|dischi?","Cinesini"],
+  ["mini_goal","porticin[ae]|mini port[ae]|mini goals?","Porticine"],
+  ["mannequin","sagome?|mannequins?","Sagome"],
+  ["hurdle","ostacoli?|ostacolini?|hurdles?","Ostacoli"],
+]);
+
+export function extractDeclaredTacticalEquipment(exercise:Exercise){
+  const material=normalize(exercise.materiale),declared:Partial<Record<TacticalElementType,number>>={};
+  for(const [type,nouns] of declaredEquipmentPatterns){
+    const matches=[...material.matchAll(new RegExp(`(?:(${declaredCountToken})\\s*(?:(?:-|\\u2013|\\u2014)\\s*(?:${declaredCountToken}))?\\s+)?(?:${nouns})\\b`,"g"))];
+    if(!matches.length)continue;
+    declared[type]=matches.reduce((sum,match)=>sum+asDeclaredCount(match[1],1),0);
+  }
+  return declared;
+}
+
+function equipmentInventory(exercise:Exercise,requirements:TacticalSetupRequirement[],diagram:TacticalDiagram):TacticalEquipmentInventory[]{
+  const declared=extractDeclaredTacticalEquipment(exercise),rendered=counts(diagram),types=new Set<TacticalElementType>([...Object.keys(declared) as TacticalElementType[],...requirements.map(item=>item.type),...Object.keys(rendered) as TacticalElementType[]]);
+  return [...types].filter(type=>declared[type]||requirements.some(item=>item.type===type)).map(type=>{
+    const required=Math.max(0,...requirements.filter(item=>item.type===type&&item.essential).map(item=>item.count)),declaredCount=declared[type]??0;
+    return{type,declared:declaredCount,required,optional:Math.max(0,declaredCount-required),rendered:rendered[type]??0};
+  });
+}
+
+function inventoryInfos(inventory:TacticalEquipmentInventory[]){
+  const labels=new Map(declaredEquipmentPatterns.map(([type,,label])=>[type,label]));
+  return inventory.flatMap(item=>{
+    if(item.declared<=item.required)return[];
+    const label=labels.get(item.type)??item.type;
+    return[item.required>0?`${label}: ${item.declared} dichiarati, ${item.required} semanticamente necessari; ${item.optional} di scorta/non funzionali`:`${label}: ${item.declared} dichiarati ma non richiesti dallo svolgimento`];
+  });
+}
 
 export function extractTacticalSetupRequirements(exercise:Exercise):TacticalSetupRequirement[]{
   const text=setupText(exercise),output:TacticalSetupRequirement[]=[];
   const essential=(type:TacticalElementType,count:number,relation:TacticalSetupRelation,reason:string)=>addRequirement(output,{type,count,relation,reason,essential:true});
-  const secondary=(type:TacticalElementType,reason:string)=>addRequirement(output,{type,count:1,relation:"presence",reason,essential:false});
 
   if(/quadrato (?:di |con )?(?:4|quattro) (?:coni|cinesini|marker)/.test(text)){const marker=/cinesini|marker/.test(text.match(/quadrato[^.]+/)?.[0]??"");essential(marker?"marker":"cone",4,marker?"marker_zone":"cone_square","Quattro riferimenti formano un quadrato");}
   if(/rombo (?:di |con )?(?:4|quattro)? ?(?:coni|cinesini|marker)/.test(text)){const marker=/cinesini|marker/.test(text.match(/rombo[^.]+/)?.[0]??"");essential(marker?"marker":"cone",4,marker?"marker_zone":"cone_diamond","Quattro riferimenti formano un rombo");}
@@ -61,14 +102,11 @@ export function extractTacticalSetupRequirements(exercise:Exercise):TacticalSetu
   if(/(?:tiro|conclusione)[^.]{0,25}(?:dietro|oltre) (?:la )?(?:sagoma|mannequin)/.test(text))essential("mannequin",1,"mannequin_screen","La sagoma è posta sulla linea di tiro");
 
   const hurdles=text.match(new RegExp(`(?:supera|oltrepassa|salta)[^.]{0,18}(${countToken}) (?:ostacoli|ostacolini|hurdles?)`));if(hurdles)essential("hurdle",asCount(hurdles[1],1),"hurdle_sequence","Gli ostacoli sono una sequenza del percorso");
-  if(!/posizionament/.test(text)&&/(?:gk|portiere|tiratore|servitore|appoggio|compagno|giocatore|attaccante)[^.]{0,60}(?:palla|pallone|passaggio|passa|tira|conclude|cross)/.test(text))essential("ball",1,"ball_owner","La palla attiva deve essere associata alla propria origine");
-  if(/seconda palla|secondo pallone|due palloni attivi|multi[- ]?ball/.test(text))essential("ball",2,"second_ball_source","Le due fasi richiedono origini di palla distinte");
-
-  if(!output.some(item=>item.type==="cone")&&/\b(?:cono|coni)\b/.test(text))secondary("cone","Coni dichiarati senza funzione spaziale indispensabile");
-  if(!output.some(item=>item.type==="marker")&&/\b(?:cinesini?|delimitatori?|marker|dischi?)\b/.test(text))secondary("marker","Cinesini dichiarati senza relazione indispensabile");
-  if(!output.some(item=>item.type==="mini_goal")&&/\b(?:porticine?|mini porte?|mini goals?)\b/.test(text))secondary("mini_goal","Porticina dichiarata senza target esplicito");
-  if(!output.some(item=>item.type==="mannequin")&&/\b(?:sagome?|mannequin)\b/.test(text))secondary("mannequin","Sagoma dichiarata senza relazione indispensabile");
-  if(!output.some(item=>item.type==="hurdle")&&/\b(?:ostacoli?|ostacolini?|hurdles?)\b/.test(text))secondary("hurdle","Ostacolo dichiarato senza sequenza esplicita");
+  if(!/posizionament/.test(text)&&/(?:gk|portiere|preparatore|tiratore|servitore|appoggio|compagno|giocatore|attaccante)[^.]{0,70}(?:palla|pallone|passaggio|passa|tira|tiro|conclude|conclusione|cross)/.test(text))essential("ball",1,"ball_owner","La palla attiva deve essere associata alla propria origine");
+  if(/seconda palla|secondo pallone|due palloni attivi|multi[- ]?ball|palla vagante/.test(text)){
+    const derived=/(?:respint|rimbalz|ribattut|palla vagante|deviazione corta|palla libera dopo|seconda azione sulla stessa palla)/.test(text);
+    essential("ball",derived?1:2,derived?"derived_second_ball":"second_ball_source",derived?"La seconda fase deriva dalla prima palla":"Le due fasi richiedono origini di palla distinte");
+  }
   return output;
 }
 
@@ -103,7 +141,7 @@ function repair(exercise:Exercise,diagram:TacticalDiagram,requirement:TacticalSe
   if(requirement.relation==="mannequin_screen"){const action=diagram.actions.find(item=>item.type==="tiro")??firstTechnicalAction(diagram);const point=action?{x:action.startX+(action.endX-action.startX)*.55,y:action.startY+(action.endY-action.startY)*.55}:{x:50,y:52};Object.assign(ensure(diagram,"mannequin",1,[point],"Schermo tiro")[0],point);repairs.push("Sagoma inserita sulla linea di tiro");return;}
   if(requirement.relation==="hurdle_sequence"){const owner=gk??start,origin=owner??{x:50,y:72},points=Array.from({length:requirement.count},(_,index)=>({x:origin.x,y:origin.y-(index+1)*Math.max(7,(origin.y-30)/(requirement.count+1))})),items=ensure(diagram,"hurdle",requirement.count,points,"Sequenza ostacoli");items.forEach((item,index)=>Object.assign(item,points[index]));addPathActions(diagram,{x:origin.x,y:origin.y},points,owner?.id);repairs.push("Ostacoli ordinati e attraversati dalla sequenza di movimento");return;}
   if(requirement.relation==="ball_owner"){const action=firstTechnicalAction(diagram),owner=actionOwner(diagram,action)??actorByRole(diagram,/tiratore|servitore|attaccante|appoggio|compagno/)??start;if(!owner)return;const ball=ensure(diagram,"ball",1,[foot(owner)],"Palla attiva")[0],point=foot(owner);Object.assign(ball,point,{role:`Palla di ${owner.role??owner.id}`});if(action)Object.assign(action,{startX:ball.x,startY:ball.y,fromElementId:ball.id});repairs.push("Palla associata al piede della prima origine");return;}
-  if(requirement.relation==="second_ball_source"){const actions=diagram.actions.filter(item=>["tiro","passaggio","cross"].includes(item.type)),owners=[actionOwner(diagram,actions[0])??actorByRole(diagram,/tiratore|attaccante|servitore/),actionOwner(diagram,actions[1])??actorByRole(diagram,/appoggio|compagno|secondo servitore/)].filter((item):item is TacticalDiagramElement=>Boolean(item));if(owners.length<2||owners[0].id===owners[1].id)return;const points=owners.slice(0,2).map(foot),balls=ensure(diagram,"ball",2,points,"Palla attiva");balls.forEach((ball,index)=>Object.assign(ball,points[index],{role:`Palla di ${owners[index].role??owners[index].id}`}));for(let index=0;index<2&&index<actions.length;index+=1)Object.assign(actions[index],{startX:balls[index].x,startY:balls[index].y,fromElementId:balls[index].id});repairs.push("Due palloni associati a due origini distinte");}
+  if(requirement.relation==="second_ball_source"){const actions=diagram.actions.filter(item=>["tiro","passaggio","cross"].includes(item.type)),firstOwner=actionOwner(diagram,actions[0])??actorByRole(diagram,/tiratore|attaccante|servitore/),secondOwner=actionOwner(diagram,actions[1])??actorByRole(diagram,/appoggio|compagno|secondo servitore/)??firstOwner;if(!firstOwner||!secondOwner||actions.length<2)return;const firstPoint=foot(firstOwner),secondBase=foot(secondOwner),secondPoint=firstOwner.id===secondOwner.id?{x:Math.max(7,Math.min(93,secondBase.x+(secondBase.x<50?7:-7))),y:secondBase.y}:secondBase,points=[firstPoint,secondPoint],balls=ensure(diagram,"ball",2,points,"Palla attiva");balls.forEach((ball,index)=>Object.assign(ball,points[index],{role:`Palla ${index?"B":"A"} di ${(index?secondOwner:firstOwner).role??(index?secondOwner:firstOwner).id}`}));for(let index=0;index<2;index+=1)Object.assign(actions[index],{startX:balls[index].x,startY:balls[index].y,fromElementId:balls[index].id});repairs.push(firstOwner.id===secondOwner.id?"Due palloni distinti associati allo stesso servitore":"Due palloni associati a due origini distinte");}
 }
 
 function elementSatisfied(requirement:TacticalSetupRequirement,diagram:TacticalDiagram){return diagram.elements.filter(item=>item.type===requirement.type).length>=requirement.count;}
@@ -122,7 +160,8 @@ function relationCheck(requirement:TacticalSetupRequirement,diagram:TacticalDiag
   if(requirement.relation==="mannequin_screen"){const shot=actions.find(action=>action.type==="tiro");valid=Boolean(shot&&items.some(item=>pointOnSegment(item,{x:shot.startX,y:shot.startY},{x:shot.endX,y:shot.endY})<3));generated=valid?"Sagoma sulla linea di tiro":"Sagoma non coinvolta nel tiro";}
   if(requirement.relation==="hurdle_sequence"){const ordered=new Set(items.slice(0,requirement.count).map(item=>item.y)).size===requirement.count,pathActions=actions.filter(item=>item.id.startsWith("validation-path-")).length;valid=ordered&&pathActions>=requirement.count;generated=valid?"Ostacoli ordinati lungo il movimento":"Ostacoli presenti ma non attraversati";}
   if(requirement.relation==="ball_owner"){valid=items.some(ball=>actors(diagram).some(owner=>Math.hypot(ball.x-owner.x,ball.y-owner.y)<=9)&&actions.some(action=>action.fromElementId===ball.id&&Math.hypot(action.startX-ball.x,action.startY-ball.y)<2));generated=valid?"Palla vicina al proprietario e origine dell'action":"Palla senza ownership tecnica";}
-  if(requirement.relation==="second_ball_source"){const firstTwo=items.slice(0,2),owners=firstTwo.map(ball=>actors(diagram).filter(owner=>Math.hypot(ball.x-owner.x,ball.y-owner.y)<=9).sort((a,b)=>Math.hypot(a.x-ball.x,a.y-ball.y)-Math.hypot(b.x-ball.x,b.y-ball.y))[0]?.id),linked=firstTwo.every(ball=>actions.some(action=>action.fromElementId===ball.id));valid=firstTwo.length===2&&Boolean(owners[0]&&owners[1]&&owners[0]!==owners[1])&&linked;generated=valid?"Due palloni, due proprietari e due origini":"Seconda palla non associata a un'origine distinta";}
+  if(requirement.relation==="second_ball_source"){const firstTwo=items.slice(0,2),linked=firstTwo.every(ball=>actions.some(action=>action.fromElementId===ball.id));valid=firstTwo.length===2&&firstTwo[0].id!==firstTwo[1].id&&linked;generated=valid?"Due palloni distinti collegati alle due fasi":"Seconda palla non associata a un'origine distinta";}
+  if(requirement.relation==="derived_second_ball"){const ordered=actions.slice().sort((a,b)=>a.sequence-b.sequence),first=ordered.find(item=>["tiro","passaggio","cross"].includes(item.type)),transition=ordered.find(item=>item.sequence>(first?.sequence??0)&&item.type==="recupero"),second=ordered.find(item=>item.sequence>(transition?.sequence??first?.sequence??0)&&["movimento","tuffo","tiro","passaggio"].includes(item.type));valid=Boolean(first&&transition&&second&&Math.hypot(second.startX-first.endX,second.startY-first.endY)<=18);generated=valid?"Seconda fase collegata all'esito della prima palla":"Transizione verso la seconda azione derivata non riconoscibile";}
   return{relation:requirement.relation,type:requirement.type,expected,generated,valid};
 }
 
@@ -130,11 +169,12 @@ export function validateTacticalSetup(exercise:Exercise,diagram:TacticalDiagram,
   const expectedElements=extractTacticalSetupRequirements(exercise),source=options.source??exercise.diagram_source??"automatic",canRepair=(options.autoRepair??true)&&source==="automatic",output=clone(diagram),repairs:string[]=[];
   if(canRepair)for(const requirement of expectedElements.filter(item=>item.essential)){const check=relationCheck(requirement,output);if(!check.valid)repair(exercise,output,requirement,repairs);}
   const layout=refineEquipmentLayout(output,expectedElements,(options.refineLayout??true)&&canRepair?source:"manual");
-  const laidOut=layout.diagram,elementIssues:string[]=[],relationChecks=expectedElements.filter(item=>item.essential).map(item=>relationCheck(item,laidOut)),relationIssues:string[]=[],warnings:string[]=[];
+  const laidOut=layout.diagram,elementIssues:string[]=[],relationChecks=expectedElements.filter(item=>item.essential).map(item=>relationCheck(item,laidOut)),relationIssues:string[]=[],warnings:string[]=[],layoutIssues:string[]=[];
   for(const requirement of expectedElements.filter(item=>item.essential)){if(elementSatisfied(requirement,laidOut))continue;elementIssues.push(`${requirement.reason}: attesi ${requirement.count} ${requirement.type}`);}
   for(const check of relationChecks)if(!check.valid)relationIssues.push(`${check.expected}: ${check.generated}`);
-  for(const requirement of expectedElements.filter(item=>!item.essential))if(!elementSatisfied(requirement,laidOut))warnings.push(`${requirement.reason}: dettaglio secondario non rappresentato`);
-  warnings.push(...layout.validation.warnings);
-  const issues=[...elementIssues,...relationIssues],status:TacticalSetupValidationStatus=issues.length?"NEEDS_REVIEW":warnings.length?"VALID_WITH_WARNINGS":"VALID";
-  return{status,diagram:laidOut,relevantData:relevantData(exercise),expectedElements,generatedElements:counts(laidOut),expectedRelations:relationChecks.map(item=>item.expected),generatedRelations:relationChecks.map(item=>item.generated),elementValidation:{valid:elementIssues.length===0,issues:elementIssues},relationValidation:{valid:relationIssues.length===0,issues:relationIssues,checks:relationChecks},layoutValidation:layout.validation,layoutDensity:layout.density,layoutZones:layout.zones,layoutAdjustments:layout.adjustments,issues,warnings,repairs};
+  const metrics=layout.validation.metrics,criticalCollision=metrics.realCollision>0||metrics.excessiveOverlap>=5||(metrics.pathTooCompressed&&metrics.excessiveOverlap>=3);
+  if(criticalCollision)layoutIssues.push(`Collisione critica: ${metrics.realCollision} collisioni reali e ${metrics.excessiveOverlap} sovrapposizioni`);
+  else warnings.push(...layout.validation.warnings);
+  const inventory=equipmentInventory(exercise,expectedElements,laidOut),infos=inventoryInfos(inventory),issues=[...elementIssues,...relationIssues,...layoutIssues],status:TacticalSetupValidationStatus=issues.length?"NEEDS_REVIEW":warnings.length?"VALID_WITH_WARNINGS":"VALID";
+  return{status,diagram:laidOut,relevantData:relevantData(exercise),expectedElements,declaredElements:extractDeclaredTacticalEquipment(exercise),generatedElements:counts(laidOut),equipmentInventory:inventory,expectedRelations:relationChecks.map(item=>item.expected),generatedRelations:relationChecks.map(item=>item.generated),elementValidation:{valid:elementIssues.length===0,issues:elementIssues},relationValidation:{valid:relationIssues.length===0,issues:relationIssues,checks:relationChecks},layoutValidation:layout.validation,layoutDensity:layout.density,layoutZones:layout.zones,layoutAdjustments:layout.adjustments,issues,warnings,infos,repairs};
 }
