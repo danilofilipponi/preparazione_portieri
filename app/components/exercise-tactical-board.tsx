@@ -4,11 +4,12 @@ import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent }
 import type { TacticalActionType, TacticalDiagram, TacticalDiagramAction, TacticalDiagramElement } from "../../lib/types";
 import { getActionAnnotationLayout, getTacticalFieldGeometry, type ActionAnnotationLayout } from "../../lib/tactical-diagram";
 import { TacticalBoardV2 } from "./tactical-board-v2";
+import { TacticalBoardV2Final, TacticalBoardV2Refined } from "./tactical-board-v2-refined";
 
 export type TacticalBoardProps = {
   diagram: TacticalDiagram;
   className?: string;
-  rendererVersion?: "v1" | "v2";
+  rendererVersion?: "v1" | "v2" | "v2-refined" | "v2-final";
   selectedId?: string | null;
   interactive?: boolean;
   showActionLabels?: boolean;
@@ -93,5 +94,8 @@ function ExerciseTacticalBoardV1({ diagram, className = "", selectedId, interact
 }
 
 export function ExerciseTacticalBoard(props: TacticalBoardProps) {
-  return props.rendererVersion === "v1" ? <ExerciseTacticalBoardV1 {...props} /> : <TacticalBoardV2 {...props} />;
+  if (props.rendererVersion === "v1") return <ExerciseTacticalBoardV1 {...props} />;
+  if (props.rendererVersion === "v2") return <TacticalBoardV2 {...props} />;
+  if (props.rendererVersion === "v2-refined") return <TacticalBoardV2Refined {...props} />;
+  return <TacticalBoardV2Final {...props} />;
 }

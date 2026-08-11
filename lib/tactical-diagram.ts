@@ -135,6 +135,104 @@ export function optimizeTacticalDiagramLayout(diagram: TacticalDiagram, source: 
   return { ...diagram, canvas: { ...diagram.canvas }, elements, actions };
 }
 
+export const TACTICAL_COMPOSITION_DISTANCES = Object.freeze({
+  goalkeeperGoalLine: 16,
+  goalkeeperBall: 10,
+  goalkeeperBadge: 9,
+  playerBall: 6.2,
+  playerBadge: 7.5,
+  players: 12,
+  badges: 7,
+  equipment: 6,
+  safeArea: 6,
+});
+
+const humanTypes = new Set<TacticalElementType>(["goalkeeper", "attacker", "player", "coach"]);
+const equipmentTypes = new Set<TacticalElementType>(["cone", "marker", "mannequin", "hurdle", "mini_goal"]);
+
+function compositionTarget(template: TacticalTemplateKey, item: TacticalDiagramElement, ball?: TacticalDiagramElement) {
+  if (item.type === "goalkeeper") {
+    if (template === "uno_contro_uno") return { x: 50, y: 57 };
+    if (template === "uscita_bassa") return { x: 50, y: 62 };
+    if (template === "cross" || template === "uscita_alta") return { x: ball ? (ball.x < 50 ? 47 : 53) : 50, y: 70 };
+    if (template === "tecnica_piede") return { x: 50, y: 79 };
+    if (template === "posizionamento_porta" && ball) return { x: 50 + (ball.x - 50) * .32, y: 72 };
+    if (["tuffo_laterale", "parata_ravvicinata", "presa"].includes(template) && ball) return { x: 50 + (ball.x - 50) * .18, y: 72 };
+    return { x: item.x, y: Math.min(item.y, 76) };
+  }
+  if (item.role === "Servitore" && (template === "cross" || template === "uscita_alta")) return { x: item.x < 50 ? 9 : 91, y: 30 };
+  if (item.role === "Appoggio" && template === "tecnica_piede") return { x: item.x < 50 ? 20 : 80, y: 32 };
+  if (item.role === "Appoggio" && ["seconda_palla", "combinazione", "match_simulation", "sequenza_gara"].includes(template)) return { x: item.x < 50 ? 26 : 76, y: 36 };
+  if (item.role === "Tiratore" && ["tuffo_laterale", "parata_ravvicinata"].includes(template)) return { x: item.x, y: Math.min(item.y, 36) };
+  if (item.role === "Tiratore" && ["seconda_palla", "combinazione", "match_simulation", "sequenza_gara"].includes(template)) return { x: item.x < 50 ? 30 : 70, y: 28 };
+  if (item.role === "Attaccante" && template === "uno_contro_uno") return { x: 50, y: 24 };
+  if (item.type === "marker" && template === "posizionamento_porta") return { x: item.x < 50 ? 36 : 64, y: 69 };
+  return { x: item.x, y: item.y };
+}
+
+/** Rifinitura semantica delle sole coordinate automatiche, prima della proiezione. */
+export function refineTacticalComposition(diagram: TacticalDiagram, template: TacticalTemplateKey = "generale", source: DiagramSource | null = "automatic"): TacticalDiagram {
+  if (source === "manual" || source === "automatic_edited") return diagram;
+  const original = diagram.elements.map(item => ({ ...item }));
+  const elements = diagram.elements.map(item => ({ ...item }));
+  const ball = elements.find(item => item.type === "ball");
+  const goalkeeper = elements.find(item => item.type === "goalkeeper");
+
+  for (const item of elements) {
+    const target = compositionTarget(template, item, ball);
+    item.x = clampSafe(target.x);
+    item.y = clampSafe(target.y);
+  }
+
+  if (goalkeeper) {
+    goalkeeper.y = Math.min(goalkeeper.y, getTacticalFieldGeometry(diagram.canvas.viewType).goalLineY - TACTICAL_COMPOSITION_DISTANCES.goalkeeperGoalLine);
+    if (ball && distance(goalkeeper, ball) < TACTICAL_COMPOSITION_DISTANCES.goalkeeperBall) {
+      goalkeeper.y = clampSafe(goalkeeper.y + Math.max(0, TACTICAL_COMPOSITION_DISTANCES.goalkeeperBall - distance(goalkeeper, ball)));
+    }
+  }
+
+  if (ball) {
+    const owner = elements.filter(item => humanTypes.has(item.type)).sort((a, b) => distance(a, ball) - distance(b, ball))[0];
+    if (owner && distance(owner, ball) < TACTICAL_COMPOSITION_DISTANCES.playerBall) {
+      const targetAction = diagram.actions.find(item => item.fromElementId === owner.id || distance({ x: item.startX, y: item.startY }, ball) < 4);
+      const target = targetAction ? { x: targetAction.endX, y: targetAction.endY } : { x: 50, y: 90 };
+      const dx = target.x - owner.x; const dy = target.y - owner.y; const length = Math.max(1, Math.hypot(dx, dy));
+      ball.x = clampSafe(owner.x + dx / length * TACTICAL_COMPOSITION_DISTANCES.playerBall);
+      ball.y = clampSafe(owner.y + dy / length * TACTICAL_COMPOSITION_DISTANCES.playerBall);
+    }
+  }
+
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    for (let left = 0; left < elements.length; left += 1) for (let right = left + 1; right < elements.length; right += 1) {
+      const first = elements[left]; const second = elements[right];
+      const bothHuman = humanTypes.has(first.type) && humanTypes.has(second.type);
+      const includesBall = first.type === "ball" || second.type === "ball";
+      const minimum = bothHuman ? TACTICAL_COMPOSITION_DISTANCES.players : includesBall ? TACTICAL_COMPOSITION_DISTANCES.playerBall : TACTICAL_COMPOSITION_DISTANCES.equipment;
+      const current = distance(first, second);
+      if (current >= minimum || (!bothHuman && !includesBall && !equipmentTypes.has(first.type) && !equipmentTypes.has(second.type))) continue;
+      const movable = first.type === "goalkeeper" ? second : second.type === "goalkeeper" ? first : includesBall ? (first.type === "ball" ? first : second) : equipmentTypes.has(second.type) ? second : first;
+      const fixed = movable === first ? second : first;
+      const angle = current < .1 ? (left + right) % 2 ? Math.PI / 3 : -Math.PI / 3 : Math.atan2(movable.y - fixed.y, movable.x - fixed.x);
+      const shift = Math.min(2.8, minimum - current + .5);
+      movable.x = clampSafe(movable.x + Math.cos(angle) * shift);
+      movable.y = clampSafe(movable.y + Math.sin(angle) * shift);
+    }
+  }
+
+  const movement = new Map(elements.map((item, index) => [item.id, { x: item.x - original[index].x, y: item.y - original[index].y }]));
+  const movementNear = (point:{x:number;y:number}, preferredId?:string) => {
+    const nearest = original.map(item => ({ item, gap: distance(point, item) })).sort((a, b) => a.gap - b.gap)[0];
+    const anchor = nearest && nearest.gap <= 7 ? nearest.item.id : preferredId;
+    return anchor ? movement.get(anchor) : undefined;
+  };
+  const actions = offsetOverlappingActions(diagram.actions.map(item => {
+    const start = movementNear({ x: item.startX, y: item.startY }, item.fromElementId);
+    const end = movementNear({ x: item.endX, y: item.endY }, item.toElementId);
+    return { ...item, startX: clampSafe(item.startX + (start?.x ?? 0)), startY: clampSafe(item.startY + (start?.y ?? 0)), endX: clampSafe(item.endX + (end?.x ?? 0)), endY: clampSafe(item.endY + (end?.y ?? 0)) };
+  }));
+  return { ...diagram, canvas: { ...diagram.canvas }, elements, actions };
+}
+
 export type ActionAnnotationLayout = { badgeX: number; badgeY: number; labelX: number; labelY: number };
 
 /** Posiziona badge e label scegliendo il lato della traiettoria più libero. */
@@ -151,8 +249,8 @@ export function getActionAnnotationLayout(actionItem: TacticalDiagramAction, ele
     return [-1, 1].map(side => ({ x: clampSafe(point.x + -tangent.y / length * offset * side), y: clampSafe(point.y + tangent.x / length * offset * side) }));
   }));
   const clearance = (candidate: { x: number; y: number }, extra?: { x: number; y: number }) => Math.min(...elements.map(item => distance(candidate, item) - annotationExclusionRadius[item.type]), ...occupied.map(item => distance(candidate, item) - 5.5), extra ? distance(candidate, extra) - 4.5 : 100, candidate.x - 6, 94 - candidate.x, candidate.y - 6, 94 - candidate.y);
-  const badge = candidates([.3, .46, .62], [3.8, 5.2]).sort((a, b) => clearance(b) - clearance(a))[0];
-  const label = candidates([.4, .52, .64], [6.8, 8.6]).sort((a, b) => clearance(b, badge) - clearance(a, badge))[0];
+  const badge = candidates([.25, .5, .75], [4.2, 5.8]).sort((a, b) => clearance(b) - clearance(a))[0];
+  const label = candidates([.32, .56, .72], [7.2, 9]).sort((a, b) => clearance(b, badge) - clearance(a, badge))[0];
   return { badgeX: badge.x, badgeY: badge.y, labelX: label.x, labelY: label.y };
 }
 
@@ -210,7 +308,7 @@ export function normalizeGeneratedActions(actions: TacticalDiagramAction[]): Tac
   }));
 }
 
-export function generateTacticalDiagram(exercise: Exercise): TacticalDiagram {
+export function generateTacticalDiagram(exercise: Exercise, options: { refineComposition?: boolean } = {}): TacticalDiagram {
   const key = resolveTacticalTemplate(exercise);
   const sourceText = sequenceText(exercise);
   const allText = classificationText(exercise);
@@ -294,7 +392,8 @@ export function generateTacticalDiagram(exercise: Exercise): TacticalDiagram {
   if (/porticina|mini[- ]?porta/.test(sourceText) && !base.elements.some(item => item.type === "mini_goal")) base.elements.push(element("mini-goal-1", "mini_goal", 78, 44, undefined, "Porticina"));
   if (/lato opposto/.test(sourceText)) base.actions.push(action("opposite", "movimento", goalkeeper.x, goalkeeper.y, goalkeeper.x < 50 ? 65 : 35, 65, base.actions.length + 1, "Lato opposto", "curved"));
   if (/recupero (al )?centro/.test(sourceText) && !base.actions.some(item => item.label?.toLowerCase().includes("centro"))) base.actions.push(action("recover-centre", "recupero", 65, 65, 50, 72, base.actions.length + 1, "Recupero centro", "dashed"));
-  return optimizeTacticalDiagramLayout({ ...base, actions: normalizeGeneratedActions(base.actions) }, "automatic");
+  const optimized = optimizeTacticalDiagramLayout({ ...base, actions: normalizeGeneratedActions(base.actions) }, "automatic");
+  return options.refineComposition === false ? optimized : refineTacticalComposition(optimized, key, "automatic");
 }
 
 export function moveDiagramElement(diagram: TacticalDiagram, id: string, x: number, y: number): TacticalDiagram {
