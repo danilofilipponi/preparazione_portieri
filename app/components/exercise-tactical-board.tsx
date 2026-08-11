@@ -3,10 +3,12 @@
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { TacticalActionType, TacticalDiagram, TacticalDiagramAction, TacticalDiagramElement } from "../../lib/types";
 import { getActionAnnotationLayout, getTacticalFieldGeometry, type ActionAnnotationLayout } from "../../lib/tactical-diagram";
+import { TacticalBoardV2 } from "./tactical-board-v2";
 
-type Props = {
+export type TacticalBoardProps = {
   diagram: TacticalDiagram;
   className?: string;
+  rendererVersion?: "v1" | "v2";
   selectedId?: string | null;
   interactive?: boolean;
   showActionLabels?: boolean;
@@ -67,7 +69,7 @@ function ActionPath({ item, annotation, showLabel }: { item: TacticalDiagramActi
   return <g><title>{tooltip}</title><path d={d} fill="none" stroke={appearance.color} strokeWidth={appearance.strokeWidth} strokeDasharray={item.style === "dashed" ? appearance.dash ?? "7 5" : appearance.dash} markerEnd={`url(#arrow-${item.type})`} vectorEffect="non-scaling-stroke" /><circle className="action-sequence-badge" cx={annotation.badgeX} cy={annotation.badgeY} r="2.45" fill="#fff" stroke={appearance.color} strokeWidth=".75" /><text x={annotation.badgeX} y={annotation.badgeY + 1} textAnchor="middle" fontSize="2.8" fontWeight="800" fill={appearance.color}>{item.sequence}</text>{showLabel && item.label && <text className="action-visible-label" x={annotation.labelX} y={annotation.labelY + 1} textAnchor="middle" fontSize="3" fontWeight="700" fill={appearance.color} paintOrder="stroke" stroke="#fff" strokeWidth="1.6">{item.label}</text>}</g>;
 }
 
-export function ExerciseTacticalBoard({ diagram, className = "", selectedId, interactive, showActionLabels = false, onSelect, onMoveElement, onActionPoint, onCanvasPointerDown, onCanvasPointerUp }: Props) {
+function ExerciseTacticalBoardV1({ diagram, className = "", selectedId, interactive, showActionLabels = false, onSelect, onMoveElement, onActionPoint, onCanvasPointerDown, onCanvasPointerUp }: TacticalBoardProps) {
   const coordinate = (event: ReactMouseEvent<SVGSVGElement>) => { const rect = event.currentTarget.getBoundingClientRect(); return { x: (event.clientX - rect.left) / rect.width * 100, y: (event.clientY - rect.top) / rect.height * 100 }; };
   const beginElementDrag = (event: ReactPointerEvent<SVGGElement>, id: string) => { if (!interactive) return; event.stopPropagation(); onSelect?.(id); event.currentTarget.setPointerCapture(event.pointerId); };
   const moveElement = (event: ReactPointerEvent<SVGGElement>, id: string) => { if (!interactive || !event.currentTarget.hasPointerCapture(event.pointerId)) return; const svg = event.currentTarget.ownerSVGElement; if (!svg) return; const rect = svg.getBoundingClientRect(); onMoveElement?.(id, (event.clientX - rect.left) / rect.width * 100, (event.clientY - rect.top) / rect.height * 100); };
@@ -88,4 +90,8 @@ export function ExerciseTacticalBoard({ diagram, className = "", selectedId, int
       {dynamicElements.map(item => { const shortLabel = item.label?.trim(); const showElementLabel = item.type !== "marker" && Boolean(shortLabel && shortLabel.length <= 3); return <g key={item.id} className={`tactical-element ${selectedId === item.id ? "selected" : ""}`} transform={`translate(${item.x} ${item.y}) rotate(${item.rotation})`} onPointerDown={event => beginElementDrag(event, item.id)} onPointerMove={event => moveElement(event, item.id)}><Icon item={item} />{showElementLabel && <text y={12} textAnchor="middle" fontSize="3.4" fontWeight="800" fill="#173d2b" paintOrder="stroke" stroke="#fff" strokeWidth="1.5">{shortLabel}</text>}</g>; })}
     </svg>
   </div>;
+}
+
+export function ExerciseTacticalBoard(props: TacticalBoardProps) {
+  return props.rendererVersion === "v1" ? <ExerciseTacticalBoardV1 {...props} /> : <TacticalBoardV2 {...props} />;
 }
