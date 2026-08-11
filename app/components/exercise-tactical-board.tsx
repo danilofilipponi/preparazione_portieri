@@ -13,6 +13,8 @@ export type TacticalBoardProps = {
   selectedId?: string | null;
   interactive?: boolean;
   showActionLabels?: boolean;
+  /** Mostra gli anchor tecnici delle actions esclusivamente nelle pagine DEV/debug. */
+  showTechnicalMarkers?: boolean;
   onSelect?: (id: string | null) => void;
   onMoveElement?: (id: string, x: number, y: number) => void;
   onActionPoint?: (id: string, point: "start" | "end", x: number, y: number) => void;

@@ -13,7 +13,7 @@ const vite = await createServer({ root, configFile: false, plugins: [react()], s
 
 try {
   const { ExerciseTacticalBoard } = await vite.ssrLoadModule("/app/components/exercise-tactical-board.tsx");
-  const { generateTacticalDiagram, refineTacticalComposition, resolveTacticalTemplate } = await vite.ssrLoadModule("/lib/tactical-diagram.ts");
+  const { applySemanticTacticalComposition, classifyTacticalFamily, generateTacticalDiagram, refineTacticalComposition, resolveTacticalCompositionSide, resolveTacticalTemplate } = await vite.ssrLoadModule("/lib/tactical-diagram.ts");
   const base = { id: "preview", codice: "GK-DEMO", nome: "Demo", category_id: 1, subcategory_id: 1, categoria: "Tecnica", sottocategoria: "Demo", fase: "Analitico", obiettivo: "Demo", descrizione: "Demo", durata_min: 10, portieri_min: 1, portieri_max: 2, intensita: "Media", difficolta: 2, materiale: "Palloni", variante: null, coaching_points: "", errori_comuni: "", schema_step_1: "Azione iniziale", schema_step_2: "Intervento", schema_step_3: "Recupero", schema_step_4: null, schema_step_5: null, schema_step_6: null, scenario_gara: null, numero_azioni: null, schema_url: null, foto_url: null, attivo: true };
   const samples = [
     ["Tuffo laterale", { nome: "Tuffo laterale su tiro diagonale", descrizione: "Il tiratore conclude e il portiere effettua un tuffo laterale" }],
@@ -38,11 +38,11 @@ try {
   const width = 1500; const boardWidth = 680; const boardHeight = 425; const rowHeight = 520;
   await mkdir(resolve(root, "tmp"), { recursive: true });
   const comparisons = [
-    { file: "tactical-board-v2-composition-refined-comparison.png", title: "V2 Final attuale / V2 Composition Refined", left: "V2 FINAL ATTUALE", right: "V2 COMPOSITION REFINED", leftVersion: "v2-final", rightVersion: "v2-final", note: "Stesso JSON di partenza; cambia esclusivamente il refinement delle coordinate automatiche." },
+    { file: "tactical-board-v2-semantic-composition-comparison.png", title: "Composition Refined attuale / Semantic Composition", left: "COMPOSITION REFINED ATTUALE", right: "SEMANTIC COMPOSITION", leftVersion: "v2-final", rightVersion: "v2-final", note: "Stesso JSON di partenza; a destra layout semantico per famiglia e collision pass conservativo." },
   ];
   for (const item of comparisons) {
     const rows = samples.map(([title, patch], index) => {
-      const exercise = { ...base, ...patch }; const diagram = generateTacticalDiagram(exercise, { refineComposition: false }); const refined = refineTacticalComposition(diagram, resolveTacticalTemplate(exercise)); const left = dataUri(svgFrom(diagram, item.leftVersion)); const right = dataUri(svgFrom(refined, item.rightVersion)); const y = 150 + index * rowHeight;
+      const exercise = { ...base, ...patch }; const diagram = generateTacticalDiagram(exercise, { refineComposition: false }); const current = refineTacticalComposition(diagram, resolveTacticalTemplate(exercise)); const semantic = applySemanticTacticalComposition(diagram, classifyTacticalFamily(exercise), resolveTacticalCompositionSide(exercise)); const left = dataUri(svgFrom(current, item.leftVersion)); const right = dataUri(svgFrom(semantic, item.rightVersion)); const y = 150 + index * rowHeight;
       return `<text x="40" y="${y - 20}" font-family="Arial" font-size="27" font-weight="700" fill="#173d2b">${escape(title)} · stesso JSON</text><text x="40" y="${y + 26}" font-family="Arial" font-size="21" font-weight="700" fill="#52705e">${item.left}</text><text x="780" y="${y + 26}" font-family="Arial" font-size="21" font-weight="800" fill="#1e6f3c">${item.right}</text><rect x="35" y="${y + 40}" width="690" height="435" rx="14" fill="#101914" stroke="#24372c"/><rect x="775" y="${y + 40}" width="690" height="435" rx="14" fill="#0a130e" stroke="#1e6f3c" stroke-width="2"/><image href="${left}" x="40" y="${y + 45}" width="${boardWidth}" height="${boardHeight}"/><image href="${right}" x="780" y="${y + 45}" width="${boardWidth}" height="${boardHeight}"/>`;
     }).join("");
     const comparison = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${150 + samples.length * rowHeight}" viewBox="0 0 ${width} ${150 + samples.length * rowHeight}"><rect width="100%" height="100%" fill="#eef3ef"/><text x="40" y="52" font-family="Arial" font-size="34" font-weight="800" fill="#143f28">${item.title}</text><text x="40" y="82" font-family="Arial" font-size="18" fill="#607066">${item.note} Stesso identico JSON.</text>${rows}</svg>`;

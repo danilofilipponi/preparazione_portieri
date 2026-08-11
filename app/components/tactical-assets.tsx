@@ -1,36 +1,9 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { TacticalElementType } from "../../lib/types";
+export { TACTICAL_MINIMUM_DISPLAY_SCALE, TACTICAL_VISUAL_SCALE, resolveTacticalAssetScale } from "../../lib/tactical-visual-scale";
+import { resolveTacticalAssetScale } from "../../lib/tactical-visual-scale";
 
-/** Configurazione definitiva e immutabile degli asset V2 Asset Final. */
-export const TACTICAL_VISUAL_SCALE: Readonly<Record<TacticalElementType, number>> = Object.freeze({
-  goalkeeper: .83,
-  attacker: .83,
-  player: .83,
-  coach: .83,
-  ball: .38,
-  cone: .22,
-  mannequin: .52,
-  hurdle: .5,
-  mini_goal: .74,
-  goal: .78,
-  marker: .5,
-});
-
-/** Soglia applicata nelle preview compatte, dove gli asset piccoli perderebbero leggibilita. */
-export const TACTICAL_MINIMUM_DISPLAY_SCALE: Readonly<Partial<Record<TacticalElementType, number>>> = Object.freeze({
-  goalkeeper: .58,
-  attacker: .58,
-  player: .58,
-  coach: .58,
-  ball: .31,
-});
-
-export function resolveTacticalAssetScale(type:TacticalElementType,itemScale=1,compact=false){
-  const scale=itemScale*TACTICAL_VISUAL_SCALE[type];
-  return compact?Math.max(scale,TACTICAL_MINIMUM_DISPLAY_SCALE[type]??0):scale;
-}
 
 type PersonProps = { badge?: string; showBadge?: boolean };
 

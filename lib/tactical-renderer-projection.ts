@@ -41,6 +41,12 @@ export function projectTacticalAssetDepthScale(y:number){
   return .96+depth*.08;
 }
 
+/** Il pallone conserva leggibilita anche vicino alla porta: range visuale 0.99-1.01. */
+export function projectTacticalBallDepthScale(y:number){
+  const depth=Math.max(0,Math.min(1,y/100));
+  return .99+depth*.02;
+}
+
 export function projectedPath(points: TacticalProjectedPoint[], close = false) {
   if (!points.length) return "";
   return `${points.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ")}${close ? "Z" : ""}`;
