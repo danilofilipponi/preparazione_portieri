@@ -17,10 +17,6 @@ export function groupSessionExercises(items: SessionDisplayExercise[], blockOrde
     .sort((left, right) => left.blockPosition - right.blockPosition);
 }
 
-export function getSessionExerciseImage(exercise: Exercise) {
-  return exercise.schema_url || exercise.foto_url || null;
-}
-
 export function getExerciseProcedure(exercise: Exercise) {
   return [exercise.schema_step_1, exercise.schema_step_2, exercise.schema_step_3, exercise.schema_step_4, exercise.schema_step_5]
     .filter((step): step is string => Boolean(step?.trim()));

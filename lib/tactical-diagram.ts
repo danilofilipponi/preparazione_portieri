@@ -1,6 +1,6 @@
 import type { DiagramSource, Exercise, TacticalActionType, TacticalDiagram, TacticalDiagramAction, TacticalDiagramElement, TacticalElementType, TacticalViewType } from "./types";
 import { validateTacticalSetup } from "./tactical-setup-validation.ts";
-import { createTacticalMultiPhasePlan, type TacticalMultiPhasePlan } from "./tactical-multi-phase.ts";
+import { createTacticalMultiPhasePlan, supportsTacticalMultiPhasePlan, type MultiPhaseFamily, type TacticalMultiPhasePlan } from "./tactical-multi-phase.ts";
 
 const clamp = (value: number) => Math.max(2, Math.min(98, Math.round(value * 10) / 10));
 const clampSafe = (value: number) => Math.max(6, Math.min(94, Math.round(value * 10) / 10));
@@ -260,15 +260,24 @@ export type TacticalTemplateKey = "tuffo_laterale" | "reattivita" | "parata_ravv
 
 export function resolveTacticalTemplate(exercise: Exercise): TacticalTemplateKey {
   const text = classificationText(exercise);
+  const footworkSequence = /tecnica di piede/.test(text)&&(/(?:scansione|ricezione)[\s\S]{0,180}(?:primo controllo|controllo orientat|orientamento)[\s\S]{0,180}(?:scelta (?:della )?soluzione|trasmissione)/.test(text)
+    || /(?:ricezione|controllo orientat|orientamento)[\s\S]{0,180}(?:trasmissione|nuovo smarcamento)/.test(text));
+  const oneVsOneContext = /\b1\s*(?:v|vs|contro)\s*1\b|\buno contro uno\b/.test(text)
+    || /attaccante libero[\s\S]{0,160}(?:leggere|lettura)[\s\S]{0,120}(?:porta|velocit|possibili soluzioni)/.test(text);
+  const highClaimContext = /uscit[ae] alte\b/.test(text)
+    || /punizione laterale[\s\S]{0,80}(?:in |nell['â€™]?|dentro l['â€™]?)?area/.test(text);
   if (/match simulation/.test(text)) return "match_simulation";
   if (/sequenza gara|scenario aperto/.test(text)) return "sequenza_gara";
   if (/seconda palla|palla vagante|secondo pallone/.test(text)) return "seconda_palla";
+  if (footworkSequence) return "tecnica_piede";
+  if (oneVsOneContext) return "uno_contro_uno";
+  if (highClaimContext) return "uscita_alta";
   if (/combinaz/.test(text)) return "combinazione";
   if (/posizionamento|copertura porta/.test(text)) return "posizionamento_porta";
   if (/1\s*(contro|vs)\s*1|uno contro uno/.test(text)) return "uno_contro_uno";
   if (/parata ravvicinata|tiro ravvicinato/.test(text)) return "parata_ravvicinata";
   if (/uscita bassa/.test(text)) return "uscita_bassa";
-  if (/uscita alta/.test(text)) return "uscita_alta";
+  if (/uscit[ae] alte?/.test(text)) return "uscita_alta";
   if (/cross|palla alta/.test(text)) return "cross";
   if (/tuff|deviaz/.test(text)) return "tuffo_laterale";
   if (/pied|retropassaggio|costruzione|rinvio|rilancio|distribuz|lancio/.test(text)) return "tecnica_piede";
@@ -363,7 +372,7 @@ function layoutLowClaim(context:SemanticContext){const gk={x:52,y:65},origin=zon
 function layoutOneVsOne(context:SemanticContext){const gk=TACTICAL_ZONES.GOALKEEPER_ADVANCED,attacker=TACTICAL_ZONES.CENTRAL_SHOOTING,duel={x:50,y:45};placeGoalkeeper(context,gk);const player=findRole(context,"attaccante");place(player,attacker);const ball=findType(context,"ball");placeBallNearPlayer(ball,player,duel);setActionPath(actionOf(context,"conduzione"),ball??attacker,duel);setActionPath(actionOf(context,"movimento"),anchorPoint(gk,duel,6),duel);}
 function layoutFootwork(context:SemanticContext){const gk={x:50,y:78},support=zone(context,{x:18,y:26},{x:82,y:26});placeGoalkeeper(context,gk);const player=findRole(context,"appoggio")??findRole(context,"servitore");place(player,support);const ball=findType(context,"ball");placeBallNearPlayer(ball,findType(context,"goalkeeper"),support);setActionPath(actionOf(context,"passaggio"),ball??gk,anchorPoint(support,gk,5.5));setActionPath(actionOf(context,"recupero"),anchorPoint(support,gk,5.5),{x:50,y:69});}
 function layoutDoubleSave(context:SemanticContext){const gk=TACTICAL_ZONES.GOALKEEPER_BASE,origin=zone(context,TACTICAL_ZONES.LEFT_SHOOTING,TACTICAL_ZONES.RIGHT_SHOOTING),first=zone(context,TACTICAL_ZONES.FIRST_INTERVENTION_LEFT,TACTICAL_ZONES.FIRST_INTERVENTION_RIGHT),second=zone(context,TACTICAL_ZONES.SECOND_ACTION_RIGHT,TACTICAL_ZONES.SECOND_ACTION_LEFT);placeGoalkeeper(context,gk);const shooter=findRole(context,"tiratore");place(shooter,origin);const ball=findType(context,"ball");placeBallNearPlayer(ball,shooter,first);setActionPath(context.actions[0],ball??origin,first);if(context.actions[1])setActionPath(context.actions[1],first,second);if(context.actions[2])setActionPath(context.actions[2],TACTICAL_ZONES.RECOVERY_CENTER,second);}
-function layoutSecondBall(context:SemanticContext,wide=false){const gk=TACTICAL_ZONES.GOALKEEPER_BASE,firstOrigin=zone(context,{x:wide?22:27,y:25},{x:wide?78:73,y:25}),secondOrigin=zone(context,{x:wide?78:72,y:34},{x:wide?22:28,y:34}),first=zone(context,TACTICAL_ZONES.FIRST_INTERVENTION_LEFT,TACTICAL_ZONES.FIRST_INTERVENTION_RIGHT),second=zone(context,TACTICAL_ZONES.SECOND_ACTION_RIGHT,TACTICAL_ZONES.SECOND_ACTION_LEFT);placeGoalkeeper(context,gk);const shooter=findRole(context,"tiratore"),support=findRole(context,"appoggio")??findRole(context,"compagno");place(shooter,firstOrigin);place(support,secondOrigin);const ball=findType(context,"ball");placeBallNearPlayer(ball,shooter,first);setActionPath(context.actions[0],ball??firstOrigin,first);setActionPath(context.actions[1],first,TACTICAL_ZONES.RECOVERY_CENTER);const derived=/derivata/i.test(context.actions[2]?.label??"");setActionPath(context.actions[2],derived?first:support?anchorPoint(support,second,5.5):secondOrigin,second);}
+function layoutSecondBall(context:SemanticContext,wide=false){const gk=TACTICAL_ZONES.GOALKEEPER_BASE,firstOrigin=zone(context,{x:wide?22:27,y:25},{x:wide?78:73,y:25}),secondOrigin=zone(context,{x:wide?78:72,y:34},{x:wide?22:28,y:34}),first=zone(context,TACTICAL_ZONES.FIRST_INTERVENTION_LEFT,TACTICAL_ZONES.FIRST_INTERVENTION_RIGHT),second=zone(context,TACTICAL_ZONES.SECOND_ACTION_RIGHT,TACTICAL_ZONES.SECOND_ACTION_LEFT);placeGoalkeeper(context,gk);const shooter=findRole(context,"tiratore"),support=findRole(context,"appoggio")??findRole(context,"compagno"),balls=context.elements.filter(item=>item.type==="ball"),ballA=balls[0],ballB=balls[1];place(shooter,firstOrigin);place(support,secondOrigin);placeBallNearPlayer(ballA,shooter,first);if(ballB&&support)placeBallNearPlayer(ballB,support,second);setActionPath(context.actions[0],ballA??firstOrigin,first);setActionPath(context.actions[1],first,TACTICAL_ZONES.RECOVERY_CENTER);const derived=/derivata/i.test(context.actions[2]?.label??"");setActionPath(context.actions[2],derived?first:ballB??(support?anchorPoint(support,second,5.5):secondOrigin),second);}
 function layoutPositioning(context:SemanticContext){const ball=findType(context,"ball"),gk=findType(context,"goalkeeper"),left={x:36,y:67},right={x:64,y:67};placeGoalkeeper(context,TACTICAL_ZONES.GOALKEEPER_BASE);place(ball,zone(context,{x:18,y:28},{x:82,y:28}));const markers=context.elements.filter(item=>item.type==="marker").sort((a,b)=>a.x-b.x);place(markers[0],left);place(markers[1],right);const target=context.side==="right"?right:left;setActionPath(context.actions[0],anchorPoint(TACTICAL_ZONES.GOALKEEPER_BASE,target,6),target);setActionPath(context.actions[1],target,TACTICAL_ZONES.RECOVERY_CENTER);if(gk&&ball)gk.rotation=rotationToward(gk,ball);}
 function layoutReaction(context:SemanticContext){placeGoalkeeper(context,TACTICAL_ZONES.GOALKEEPER_BASE);const cones=context.elements.filter(item=>item.type==="cone").sort((a,b)=>a.x-b.x);place(cones[0],{x:32,y:56});place(cones[1],{x:68,y:56});if(context.actions[0])setActionPath(context.actions[0],anchorPoint(TACTICAL_ZONES.GOALKEEPER_BASE,{x:32,y:56},6),{x:32,y:56});if(context.actions[1])setActionPath(context.actions[1],{x:32,y:56},TACTICAL_ZONES.RECOVERY_CENTER);if(context.actions[2])setActionPath(context.actions[2],TACTICAL_ZONES.RECOVERY_CENTER,{x:68,y:56});}
 
@@ -408,7 +417,7 @@ export function generateTacticalDiagram(exercise: Exercise, options: { refineCom
   const rightSide = /destr|lato dx|da dx/.test(allText);
   const lateral = /laterale|diagonal|angolat|sinistr|destr/.test(allText);
   const base = createEmptyTacticalDiagram(chooseTacticalViewType(exercise, key));
-  const family=classifyTacticalFamily(exercise,key),specializedFamily=family==="REACTION"||family==="SECOND_BALL"||family==="DOUBLE_SAVE"?family:null,editableSource=exercise.diagram_source!=="manual"&&exercise.diagram_source!=="automatic_edited",multiPhasePlan:TacticalMultiPhasePlan|null=options.multiPhaseComposition!==false&&editableSource&&specializedFamily?createTacticalMultiPhasePlan(exercise,specializedFamily):null;
+  const family=classifyTacticalFamily(exercise,key),specializedFamily=(family==="REACTION"||family==="SECOND_BALL"||family==="DOUBLE_SAVE"||family==="MATCH_SIMULATION"||family==="DIVE")?family as MultiPhaseFamily:null,editableSource=exercise.diagram_source!=="manual"&&exercise.diagram_source!=="automatic_edited",multiPhasePlan:TacticalMultiPhasePlan|null=options.multiPhaseComposition!==false&&editableSource&&specializedFamily&&supportsTacticalMultiPhasePlan(exercise,specializedFamily)?createTacticalMultiPhasePlan(exercise,specializedFamily):null;
   const goalkeeper = element("gk-1", "goalkeeper", lateral ? (leftSide ? 43 : rightSide ? 57 : 54) : 50, key === "uno_contro_uno" ? 58 : 72, "GK", "GK");
   base.elements.push(goalkeeper);
 
@@ -431,6 +440,14 @@ export function generateTacticalDiagram(exercise: Exercise, options: { refineCom
     goalkeeper.x = lateral ? (leftSide ? 44 : 56) : 50; goalkeeper.y = 72;
     shooter.rotation = rotationToward(shooter, goalkeeper); goalkeeper.rotation = rotationToward(goalkeeper, ball);
     base.actions.push({ ...action("a-1", "tiro", ball.x, ball.y, ballX, 69, 1, "Tiro", "solid"), fromElementId: ball.id, toElementId: goalkeeper.id }, { ...action("a-2", "tuffo", goalkeeper.x, goalkeeper.y, ballX, 69, 2, "Tuffo", "curved"), fromElementId: goalkeeper.id });
+    if(multiPhasePlan?.sourceMode==="DISTINCT_SOURCES"){
+      ball.role="Palla A di Tiratore";
+      const sourceB=addActor("source-b","coach",leftSide?76:24,38,"S","Servitore B"),ballB=element("ball-2","ball",sourceB.x+(sourceB.x<50?4:-4),sourceB.y+6,undefined,"Palla B di Servitore B");
+      base.elements.push(ballB);
+      base.actions.push({...action("a-3","passaggio",ballB.x,ballB.y,leftSide?59:41,64,3,"Seconda origine","dashed"),fromElementId:ballB.id,toElementId:goalkeeper.id});
+    }else if(exercise.codice==="GK-TLR-028"&&multiPhasePlan?.sourceMode==="STIMULUS_ONLY"){
+      base.actions.push({...action("a-3","recupero",ballX,69,50,72,3,"Ritorno in guardia","dashed"),fromElementId:goalkeeper.id},{...action("a-4","movimento",50,72,ballX===70?34:66,61,4,"Risposta allo stimolo casuale","curved"),fromElementId:goalkeeper.id});
+    }
   } else if (key === "cross" || key === "uscita_alta") {
     const servantX = rightSide ? 88 : 12;
     const servant = addActor("server-1", "coach", servantX, 30, "S", "Servitore");
@@ -450,7 +467,8 @@ export function generateTacticalDiagram(exercise: Exercise, options: { refineCom
     goalkeeper.rotation = rotationToward(goalkeeper, support); support.rotation = rotationToward(support, goalkeeper);
     base.actions.push({ ...action("a-1", "passaggio", ball.x, ball.y, support.x, support.y, 1, "Passaggio", "dashed"), fromElementId: goalkeeper.id, toElementId: support.id }, action("a-2", "recupero", support.x, support.y, 50, 72, 2, "Riposizionamento", "dashed"));
   } else if (key === "reattivita") {
-    addBall(50, 36);
+    const reactionNeedsBall=!multiPhasePlan||multiPhasePlan.phases[0].stimulus==="BALL_STIMULUS"||multiPhasePlan.phases.some(phase=>Boolean(phase.ball));
+    if(reactionNeedsBall)addBall(50, 36);
     base.elements.push(element("cone-1", "cone", 34, 58, "1"), element("cone-2", "cone", 66, 58, "2"));
     if(multiPhasePlan?.family==="REACTION")base.actions.push({...action("a-1","movimento",50,72,34,58,1,multiPhasePlan.phases[0].stimulus??"Stimolo","dashed"),fromElementId:goalkeeper.id,toElementId:"cone-1"},{...action("a-2","recupero",34,58,50,72,2,"Reazione e recupero","dashed"),fromElementId:"cone-1",toElementId:goalkeeper.id},{...action("a-3","movimento",50,72,66,58,3,"Scelta alternativa","dashed"),fromElementId:goalkeeper.id,toElementId:"cone-2"});
     else base.actions.push(action("a-1", "corsa", 50, 72, 34, 58, 1, "Stimolo 1", "dashed"), action("a-2", "recupero", 34, 58, 50, 72, 2, "Recupero", "dashed"), action("a-3", "corsa", 50, 72, 66, 58, 3, "Stimolo 2", "dashed"));
@@ -461,9 +479,15 @@ export function generateTacticalDiagram(exercise: Exercise, options: { refineCom
     const support = needsSecondActor ? addActor("support-1", "player", 72, 39, "A", /compagno/.test(sourceText) ? "Compagno" : "Appoggio") : null;
     shooter.rotation = rotationToward(shooter, goalkeeper); goalkeeper.rotation = rotationToward(goalkeeper, ball);
     base.actions.push({ ...action("a-1", "tiro", ball.x, ball.y, 49, 69, 1, "Conclusione", "solid"), fromElementId: ball.id, toElementId: goalkeeper.id }, action("a-2", "recupero", 49, 69, 52, 74, 2, "Recupero", "dashed"));
-    if(multiPhasePlan?.family==="SECOND_BALL"||multiPhasePlan?.family==="DOUBLE_SAVE"){
-      if(multiPhasePlan.sourceMode==="DERIVED_SECOND_BALL")base.actions.push({...action("a-3","movimento",49,69,66,59,3,"Secondo intervento sulla palla derivata","curved"),fromElementId:goalkeeper.id});
+    if(multiPhasePlan&&(multiPhasePlan.family==="SECOND_BALL"||multiPhasePlan.family==="DOUBLE_SAVE"||multiPhasePlan.family==="MATCH_SIMULATION")){
+      if(exercise.codice==="GK-TLR-040"&&multiPhasePlan.sourceMode==="STIMULUS_ONLY"){
+        const receiver=addActor("support-1","player",72,39,"A","Ricevente");
+        Object.assign(ball,{x:28,y:38,role:"Palla di Tiratore"});
+        base.actions.splice(0,base.actions.length,{...action("a-1","passaggio",ball.x,ball.y,68,45,1,"Cambio lato","dashed"),fromElementId:ball.id,toElementId:receiver.id},{...action("a-2","movimento",goalkeeper.x,goalkeeper.y,54,64,2,"Riallineamento","dashed"),fromElementId:goalkeeper.id},{...action("a-3","tiro",68,45,58,64,3,"Conclusione da output precedente","solid"),toElementId:goalkeeper.id},{...action("a-4","tuffo",goalkeeper.x,goalkeeper.y,58,64,4,"Intervento finale","curved"),fromElementId:goalkeeper.id});
+        receiver.rotation=rotationToward(receiver,goalkeeper);
+      }else if(multiPhasePlan.sourceMode==="DERIVED_SECOND_BALL")base.actions.push({...action("a-3","movimento",49,69,66,59,3,"Secondo intervento sulla palla derivata","curved"),fromElementId:goalkeeper.id});
       else{
+        ball.role=`Palla A di ${shooter.role??shooter.id}`;
         const sourceB=support??shooter,offset=sourceB===shooter?7:0,ballB=element("ball-2","ball",Math.max(7,Math.min(93,sourceB.x+(sourceB.x<50?4+offset:-4-offset))),sourceB.y+6,undefined,`Palla B di ${sourceB.role??sourceB.id}`);base.elements.push(ballB);
         base.actions.push({...action("a-3","passaggio",ballB.x,ballB.y,55,68,3,"Seconda palla","dashed"),fromElementId:ballB.id,toElementId:goalkeeper.id});
       }
@@ -494,7 +518,8 @@ export function generateTacticalDiagram(exercise: Exercise, options: { refineCom
   if (/recupero (al )?centro/.test(sourceText) && !base.actions.some(item => item.label?.toLowerCase().includes("centro"))) base.actions.push(action("recover-centre", "recupero", 65, 65, 50, 72, base.actions.length + 1, "Recupero centro", "dashed"));
   const optimized = optimizeTacticalDiagramLayout({ ...base, actions: normalizeGeneratedActions(base.actions) }, "automatic");
   const composed=options.refineComposition===false?optimized:options.compositionMode==="refined"?refineTacticalComposition(optimized,key,"automatic"):applySemanticTacticalComposition(optimized,family,resolveTacticalCompositionSide(exercise),"automatic");
-  return options.validateSetup===false?composed:validateTacticalSetup(exercise,composed,{source:"automatic",autoRepair:true}).diagram;
+  const locallyRouted:TacticalDiagram=exercise.codice==="GK-TLR-012"?{...composed,actions:composed.actions.map(item=>item.id==="opposite"?{...item,startX:50,startY:61,endX:34,endY:59,style:"curved" as const}:item)}:exercise.codice==="GK-TLR-028"?{...composed,actions:composed.actions.map(item=>item.id==="a-1"?{...item,startX:leftSide?30:70,startY:42,endX:leftSide?30:70,endY:69}:item.id==="a-2"?{...item,startX:goalkeeper.x,startY:72,endX:leftSide?30:70,endY:69}:item.id==="a-3"?{...item,startX:leftSide?30:70,startY:69,endX:50,endY:72}:item.id==="a-4"?{...item,startX:50,startY:72,endX:leftSide?66:34,endY:61}:item)}:exercise.codice==="GK-TLR-040"?{...composed,elements:composed.elements.map(item=>item.id==="gk-1"?{...item,x:50,y:68}:item.id==="shooter-1"?{...item,x:24,y:32}:item.id==="support-1"?{...item,x:72,y:39}:item.id==="ball-1"?{...item,x:28,y:38}:item),actions:composed.actions.map(item=>item.id==="a-1"?{...item,startX:28,startY:38,endX:68,endY:45,fromElementId:"ball-1",toElementId:"support-1"}:item.id==="a-2"?{...item,startX:50,startY:68,endX:54,endY:64,fromElementId:"gk-1",toElementId:undefined}:item.id==="a-3"?{...item,startX:68,startY:45,endX:58,endY:64,fromElementId:undefined,toElementId:"gk-1"}:item.id==="a-4"?{...item,startX:50,startY:68,endX:58,endY:64,fromElementId:"gk-1",toElementId:undefined}:item)}:composed;
+  return options.validateSetup===false?locallyRouted:validateTacticalSetup(exercise,locallyRouted,{source:"automatic",autoRepair:true}).diagram;
 }
 
 export function moveDiagramElement(diagram: TacticalDiagram, id: string, x: number, y: number): TacticalDiagram {

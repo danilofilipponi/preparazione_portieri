@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateTacticalDiagram } from "../lib/tactical-diagram.ts";
+import { classifyTacticalFamily, generateTacticalDiagram, resolveTacticalTemplate } from "../lib/tactical-diagram.ts";
+import { createTacticalCatalogAudit, diagnoseTacticalCollisions } from "../lib/tactical-catalog-audit.ts";
 import { extractTacticalSetupRequirements, validateTacticalSetup } from "../lib/tactical-setup-validation.ts";
 import { calculateTacticalLayoutDensity, EQUIPMENT_MIN_DISTANCE, refineEquipmentLayout, validateEquipmentLayout } from "../lib/tactical-equipment-layout.ts";
 import type { Exercise, TacticalDiagram } from "../lib/types.ts";
 
-const base:Exercise={id:"validation",codice:"GK-VAL",nome:"Setup",category_id:1,subcategory_id:1,categoria:"Tecnica",sottocategoria:"Setup",fase:"Analitico",obiettivo:"Setup",descrizione:"",durata_min:10,portieri_min:1,portieri_max:2,intensita:"Media",difficolta:2,materiale:"Palloni",variante:null,coaching_points:"",errori_comuni:"",schema_step_1:null,schema_step_2:null,schema_step_3:null,schema_step_4:null,schema_step_5:null,schema_step_6:null,scenario_gara:null,numero_azioni:null,schema_url:null,foto_url:null,attivo:true};
+const base:Exercise={id:"validation",codice:"GK-VAL",nome:"Setup",category_id:1,subcategory_id:1,categoria:"Tecnica",sottocategoria:"Setup",fase:"Analitico",obiettivo:"Setup",descrizione:"",durata_min:10,portieri_min:1,portieri_max:2,intensita:"Media",difficolta:2,materiale:"Palloni",variante:null,coaching_points:"",errori_comuni:"",schema_step_1:null,schema_step_2:null,schema_step_3:null,schema_step_4:null,schema_step_5:null,schema_step_6:null,scenario_gara:null,numero_azioni:null,attivo:true};
 const exercise=(patch:Partial<Exercise>):Exercise=>({...base,...patch});
 const empty: TacticalDiagram={version:1,canvas:{viewType:"penalty_area",widthRatio:16,heightRatio:10},elements:[{id:"gk",type:"goalkeeper",x:50,y:68,rotation:0,scale:1,role:"Portiere"}],actions:[]};
 
@@ -36,3 +37,31 @@ test("layout equipment: setup complesso usa densità e superficie senza zoom",()
 test("layout equipment: routing aggiorna actions dopo lo spacing",()=>{const item=exercise({descrizione:"Il GK supera 3 ostacoli e recupera"}),result=validateTacticalSetup(item,empty),hurdles=result.diagram.elements.filter(value=>value.type==="hurdle"),paths=result.diagram.actions.filter(value=>value.id.startsWith("validation-path-")).sort((a,b)=>a.sequence-b.sequence);assert.equal(paths.length,3);assert.ok(paths.every((action,index)=>action.endX===hurdles[index].x&&action.endY===hurdles[index].y));});
 test("layout equipment: validazione rileva overlap e percorso compresso",()=>{const requirements=extractTacticalSetupRequirements(exercise({descrizione:"Slalom tra 5 cinesini"})),diagram:TacticalDiagram={...empty,elements:[...empty.elements,...Array.from({length:5},(_,index)=>({id:`compressed-${index}`,type:"marker" as const,x:50+index*.3,y:50,rotation:0,scale:1}))]},layout=validateEquipmentLayout(diagram,requirements,calculateTacticalLayoutDensity(diagram));assert.ok(layout.metrics.excessiveOverlap>0);assert.equal(layout.metrics.pathTooCompressed,true);assert.equal(layout.valid,false);});
 test("layout equipment: manual e automatic_edited restano identici",()=>{const requirements=extractTacticalSetupRequirements(exercise({descrizione:"Slalom tra 5 cinesini"}));for(const source of ["manual","automatic_edited"] as const)assert.equal(refineEquipmentLayout(empty,requirements,source).diagram,empty);});
+
+test("semantic gap fix: recupera solo gli alias specifici FOOTWORK, ONE_V_ONE e HIGH_CLAIM",()=>{
+  const foot=exercise({codice:"GK-TP-035",categoria:"Tecnica di piede",sottocategoria:"Combinazione in costruzione",nome:"Uscita dalla pressione con terzo uomo",descrizione:"Posizionamento e scansione. Ricezione del pallone. Primo controllo orientamento. Scelta soluzione e trasmissione."});
+  const footTwo=exercise({codice:"GK-TP-023",categoria:"Tecnica di piede",sottocategoria:"Combinazione tecnica",nome:"Uno-due con compagno",descrizione:foot.descrizione});
+  const duel=exercise({codice:"GK-CA-032",categoria:"Tecnica 1v1 - copertura angoli",nome:"Palla filtrante",descrizione:"Situazione 1v1 con attaccante libero: leggere porta e velocità e le possibili soluzioni."});
+  const duelTwo=exercise({codice:"GK-CA-033",categoria:"Tecnica 1v1 - copertura angoli",nome:"Attaccante con recupero difensore",descrizione:"Attaccante libero: leggere palla, porta e velocità prima delle possibili soluzioni."});
+  const claim=exercise({codice:"GK-UA-033",categoria:"Uscite alte e palle aeree",nome:"Punizione laterale in area",descrizione:"Battuta laterale in area con traffico."});
+  assert.deepEqual([foot,footTwo,duel,duelTwo,claim].map(value=>classifyTacticalFamily(value)),["FOOTWORK","FOOTWORK","ONE_V_ONE","ONE_V_ONE","HIGH_CLAIM"]);
+  assert.deepEqual([foot,duel,claim].map(value=>resolveTacticalTemplate(value)),["tecnica_piede","uno_contro_uno","uscita_alta"]);
+  assert.equal(classifyTacticalFamily(exercise({categoria:"Tema libero",nome:"Challenge libera",descrizione:"Circuito personalizzabile multi-obiettivo senza fondamentale dominante."})),"GENERIC");
+});
+
+test("semantic gap fix: BALL_A e BALL_B hanno SOURCE_A e SOURCE_B indipendenti",()=>{
+  for(const value of [exercise({codice:"RAP-004",nome:"Reazione su deviazione",descrizione:"Intervento reattivo dopo una deviazione ravvicinata."}),exercise({codice:"GK-ROT-040",nome:"Sequenza gara con ostacolo e seconda palla",categoria:"Reattività con ostacoli e tuffi",sottocategoria:"Sequenza gara",descrizione:"Una breve attivazione precede una conclusione reale o una seconda azione.",schema_step_2:"Esecuzione del compito motorio/ostacolo.",schema_step_4:"Stimolo o conclusione."})]){
+    const item=createTacticalCatalogAudit(value),balls=item.diagram.elements.filter(element=>element.type==="ball"),owners=item.diagram.elements.filter(element=>/Tiratore|Servitore B|Appoggio/.test(element.role??""));
+    assert.equal(balls.length,2);assert.ok(owners.length>=2);assert.ok(balls.every(ball=>item.diagram.actions.some(action=>action.fromElementId===ball.id)));assert.notEqual(item.status,"NEEDS_REVIEW");
+  }
+});
+
+test("semantic gap fix: ownership inattiva, origine 2vs1 e transizione derivata sono coerenti",()=>{
+  const mirror=createTacticalCatalogAudit(exercise({codice:"GK-TL-019",nome:"Sequenza specchio tra due portieri",categoria:"Tema libero",obiettivo:"Riprodurre rapidamente i movimenti del compagno e concludere con un gesto tecnico.",descrizione:"Esercizio specchio con stimoli variabili e gesto tecnico finale non definito."}));assert.equal(mirror.diagram.elements.filter(element=>element.type==="ball").length,0);assert.notEqual(mirror.status,"NEEDS_REVIEW");
+  const duel=createTacticalCatalogAudit(exercise({codice:"GK-CA-035",categoria:"Tecnica 1v1 - copertura angoli",nome:"2vs1: scarico laterale",descrizione:"Situazione con attaccante libero: leggere palla, porta, velocità e possibili soluzioni."})),activeBall=duel.diagram.elements.find(element=>element.type==="ball");assert.equal(duel.family,"ONE_V_ONE");assert.ok(activeBall&&duel.diagram.actions.some(action=>action.fromElementId===activeBall.id));
+  const derived=createTacticalCatalogAudit(exercise({codice:"GK-MS-041",categoria:"Match Simulation",nome:"Corner in traffico → respinta → seconda palla",descrizione:"Corner in traffico, respinta e seconda azione sulla palla derivata.",schema_step_3:"Prima azione tecnica.",schema_step_4:"Recupero e sviluppo successivo.",schema_step_5:"Seconda azione."}));assert.equal(derived.diagram.elements.filter(element=>element.type==="ball").length,1);assert.deepEqual(derived.diagram.actions.slice(0,3).map(action=>action.type),["tiro","recupero","movimento"]);assert.notEqual(derived.status,"NEEDS_REVIEW");
+});
+
+test("semantic gap fix: routing locale GK-TLR-012 elimina la collisione reale",()=>{const value=exercise({codice:"GK-TLR-012",categoria:"Tuffi laterali e reattività",sottocategoria:"Tuffo + spostamento",nome:"Alternanza destra-sinistra su servizio dichiarato",descrizione:"Il preparatore dichiara il lato. Il portiere interviene, torna al centro e riceve sul lato opposto.",schema_step_2:"Primo servizio e tuffo.",schema_step_3:"Recupero e ritorno al centro.",schema_step_4:"Secondo servizio sul lato opposto."}),item=createTacticalCatalogAudit(value);assert.equal(diagnoseTacticalCollisions(value,item.diagram).some(collision=>collision.category==="REAL_COLLISION"),false);assert.notEqual(item.status,"NEEDS_REVIEW");});
+
+test("semantic gap fix: famiglie stabili non degradano a NEEDS_REVIEW",()=>{const cases=["Seconda palla con appoggio","1v1 con attaccante libero","Tecnica di piede con ricezione e trasmissione","Doppio intervento","Parata su tiro","Posizionamento porta","Cross laterale","Uscita alta","Tuffo laterale","Reattività al colore"];for(const nome of cases){const item=createTacticalCatalogAudit(exercise({nome,descrizione:nome}));assert.notEqual(item.status,"NEEDS_REVIEW",`${nome} non deve regredire`);}const match=createTacticalCatalogAudit(exercise({nome:"Match Simulation con seconda palla",descrizione:"Il tiratore conclude, recupero e seconda palla servita dall'appoggio."}));assert.notEqual(match.status,"NEEDS_REVIEW");});

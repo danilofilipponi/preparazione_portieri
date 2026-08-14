@@ -38,8 +38,6 @@ const baseExercise: Exercise = {
   schema_step_6: null,
   scenario_gara: null,
   numero_azioni: null,
-  schema_url: null,
-  foto_url: null,
   attivo: true,
 };
 

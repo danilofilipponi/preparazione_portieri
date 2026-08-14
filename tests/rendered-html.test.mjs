@@ -18,12 +18,20 @@ test("espone una PWA installabile", async () => {
   assert.match(serviceWorker, /addEventListener\("fetch"/);
 });
 
+test("blocca tutte le route diagnostiche nel Worker production", async () => {
+  const worker = await readFile(new URL("../worker/index.ts", import.meta.url), "utf8");
+  assert.match(worker, /process\.env\.NODE_ENV === "production"/);
+  assert.match(worker, /url\.pathname === "\/dev"/);
+  assert.match(worker, /url\.pathname\.startsWith\("\/dev\/"\)/);
+  assert.match(worker, /status: 404/);
+  assert.match(worker, /"cache-control": "no-store"/);
+});
+
 test("include lo schema Supabase richiesto", async () => {
   const schema = await readFile(new URL("../supabase/migrations/0001_initial_schema.sql", import.meta.url), "utf8");
   for (const table of ["exercises", "trainings", "training_objectives", "training_exercises"]) {
     assert.match(schema, new RegExp(`create table public\\.${table}`));
   }
-  assert.match(schema, /exercise-images/);
 });
 
 test("include impostazioni persistenti del preparatore", async () => {
@@ -68,24 +76,15 @@ test("usa lo standard definitivo del catalogo e importa 36 esercizi senza duplic
   assert.equal((migration.match(/\('GK-PRA-/g) ?? []).length, 36);
 });
 
-test("gestisce immagini singole e importazione multipla senza duplicati", async () => {
+test("usa Tactical Board come unico sistema visuale degli esercizi", async () => {
   const app = await readFile(new URL("../app/keeper-app.tsx", import.meta.url), "utf8");
-  const tools = await readFile(new URL("../app/components/exercise-image-tools.tsx", import.meta.url), "utf8");
-  const storage = await readFile(new URL("../lib/exercise-images.ts", import.meta.url), "utf8");
-  const migration = await readFile(new URL("../supabase/migrations/0005_exercise_images_storage.sql", import.meta.url), "utf8");
-  assert.match(app, /Importa immagini/);
-  assert.match(app, /parseExerciseImageName/);
-  assert.match(app, /Immagini esercizio/i);
-  assert.match(tools, /Carica immagine/);
-  assert.match(tools, /Sostituisci immagine/);
-  assert.match(tools, /Elimina immagine/);
-  assert.match(tools, /File elaborati/);
-  assert.match(tools, /Schemi caricati/);
-  assert.match(tools, /Foto caricate/);
-  assert.match(storage, /`\$\{normalized\}\/\$\{kind\}\.webp`/);
-  assert.match(storage, /upsert: true/);
-  assert.match(storage, /image\/webp/);
-  assert.match(migration, /on conflict \(id\) do update set public = true/);
+  const card = await readFile(new URL("../app/components/exercise-card.tsx", import.meta.url), "utf8");
+  const types = await readFile(new URL("../lib/types.ts", import.meta.url), "utf8");
+  const production = `${app}\n${card}\n${types}`;
+  assert.match(card, /exercise\.tactical_diagram/);
+  assert.match(card, /ExerciseTacticalBoard/);
+  assert.doesNotMatch(production, /ExerciseImageModal|ExerciseImageField|BulkImageImportModal|getSessionExerciseImage/);
+  assert.doesNotMatch(production, /schema_url|foto_url|immagine_url|Importa immagini/);
 });
 
 test("sincronizza GK-PRA-001–018 e mostra lo svolgimento senza toccare le immagini", async () => {
@@ -102,8 +101,6 @@ test("sincronizza GK-PRA-001–018 e mostra lo svolgimento senza toccare le imma
   assert.match(migration, /Presa bassa con intervento attivo/);
   assert.match(migration, /update public\.exercises e/);
   assert.match(migration, /where e\.codice = o\.codice/);
-  assert.doesNotMatch(migration, /schema_url\s*=/);
-  assert.doesNotMatch(migration, /foto_url\s*=/);
   assert.doesNotMatch(migration, /Ãƒ|Ã‚/);
   for (let index = 1; index <= 18; index += 1) {
     assert.match(migration, new RegExp(`GK-PRA-${String(index).padStart(3, "0")}`));
@@ -123,8 +120,6 @@ test("sincronizza GK-PRA-001–036 con uno svolgimento fino a cinque passaggi", 
   assert.match(migration, /Deviazione con intervento attivo/);
   assert.match(migration, /update public\.exercises e/);
   assert.match(migration, /where e\.codice = o\.codice/);
-  assert.doesNotMatch(migration, /schema_url\s*=/);
-  assert.doesNotMatch(migration, /foto_url\s*=/);
   assert.doesNotMatch(migration, /insert into public\.exercises/i);
   for (let index = 1; index <= 36; index += 1) {
     assert.match(migration, new RegExp(`GK-PRA-${String(index).padStart(3, "0")}`));
@@ -169,8 +164,6 @@ test("sincronizza GK-PRA-001–040, aggiunge quattro esercizi e preserva le imma
   assert.match(migration, /on conflict \(codice\) do update set/i);
   assert.match(migration, /GK-PRA-037/);
   assert.match(migration, /GK-PRA-040/);
-  assert.doesNotMatch(migration, /schema_url\s*=/);
-  assert.doesNotMatch(migration, /foto_url\s*=/);
   for (let index = 1; index <= 40; index += 1) {
     assert.match(migration, new RegExp(`GK-PRA-${String(index).padStart(3, "0")}`));
   }
@@ -262,8 +255,6 @@ test("sincronizza tassonomia e 460 esercizi dal Catalogo MASTER", async () => {
   assert.match(migration, /jsonb_to_recordset\(catalog_data\)/);
   assert.match(migration, /on conflict \(category_id, nome, fase\) do update set/);
   assert.match(migration, /on conflict \(codice\) do update set/);
-  assert.match(migration, /schema_url = coalesce\(nullif\(excluded\.schema_url, ''\), target\.schema_url\)/);
-  assert.match(migration, /foto_url = coalesce\(nullif\(excluded\.foto_url, ''\), target\.foto_url\)/);
   assert.match(migration, /scenario_gara = excluded\.scenario_gara/);
   assert.match(migration, /numero_azioni = excluded\.numero_azioni/);
   assert.match(migration, /FASE C COMPLETATA/);

@@ -14,7 +14,7 @@ const vite = await createServer({ root, configFile:false, plugins:[react()], ser
 try {
   const { ExerciseTacticalBoard } = await vite.ssrLoadModule("/app/components/exercise-tactical-board.tsx");
   const { generateTacticalDiagram } = await vite.ssrLoadModule("/lib/tactical-diagram.ts");
-  const base = { id:"ball-preview", codice:"GK-BALL", nome:"Demo", category_id:1, subcategory_id:1, categoria:"Tecnica", sottocategoria:"Demo", fase:"Analitico", obiettivo:"Demo", descrizione:"Demo", durata_min:10, portieri_min:1, portieri_max:2, intensita:"Media", difficolta:2, materiale:"Palloni", variante:null, coaching_points:"", errori_comuni:"", schema_step_1:"Azione iniziale", schema_step_2:"Intervento", schema_step_3:"Recupero", schema_step_4:null, schema_step_5:null, schema_step_6:null, scenario_gara:null, numero_azioni:null, schema_url:null, foto_url:null, attivo:true };
+  const base = { id:"ball-preview", codice:"GK-BALL", nome:"Demo", category_id:1, subcategory_id:1, categoria:"Tecnica", sottocategoria:"Demo", fase:"Analitico", obiettivo:"Demo", descrizione:"Demo", durata_min:10, portieri_min:1, portieri_max:2, intensita:"Media", difficolta:2, materiale:"Palloni", variante:null, coaching_points:"", errori_comuni:"", schema_step_1:"Azione iniziale", schema_step_2:"Intervento", schema_step_3:"Recupero", schema_step_4:null, schema_step_5:null, schema_step_6:null, scenario_gara:null, numero_azioni:null, attivo:true };
   const samples = [
     ["Tuffo laterale", { nome:"Tuffo laterale su tiro diagonale", descrizione:"Il tiratore conclude e il portiere effettua un tuffo laterale" }],
     ["Cross", { nome:"Uscita alta su cross da sinistra", descrizione:"Il servitore effettua un cross e il portiere esce in presa alta" }],

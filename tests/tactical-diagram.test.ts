@@ -12,7 +12,7 @@ const baseExercise: Exercise = {
   descrizione: "Il tiratore passa e conclude", durata_min: 10, portieri_min: 1, portieri_max: 2, intensita: "Media",
   difficolta: 2, materiale: "Palloni, coni", variante: null, coaching_points: "Mani avanti", errori_comuni: "Mani rigide",
   schema_step_1: "Passaggio del tiratore", schema_step_2: "Presa e recupero al centro", schema_step_3: null, schema_step_4: null,
-  schema_step_5: null, schema_step_6: null, scenario_gara: null, numero_azioni: null, schema_url: null, foto_url: null, attivo: true,
+  schema_step_5: null, schema_step_6: null, scenario_gara: null, numero_azioni: null, attivo: true,
 };
 const exercise = (patch: Partial<Exercise> = {}) => ({ ...baseExercise, ...patch });
 const source = (file: string) => readFileSync(new URL(file, import.meta.url), "utf8");

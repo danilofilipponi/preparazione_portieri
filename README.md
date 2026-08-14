@@ -18,9 +18,7 @@ AI o notifiche.
    applicare lo standard definitivo e importare i 36 esercizi della prima
    categoria. L'importazione usa il codice come chiave e può essere rieseguita
    senza creare duplicati.
-6. Eseguire `supabase/migrations/0005_exercise_images_storage.sql` per verificare
-   il bucket pubblico `exercise-images` e le relative regole di caricamento,
-   sostituzione ed eliminazione.
+6. La migration storica `0005_exercise_images_storage.sql` non fa più parte del workflow corrente: la Tactical Board V2 è l'unico sistema visuale.
 7. Eseguire `supabase/migrations/0006_sync_gk_pra_001_018.sql` per sincronizzare
    i record GK-PRA-001–018 e aggiungere i due passaggi dello svolgimento.
 8. Eseguire `supabase/migrations/0007_sync_gk_pra_001_036.sql` per sincronizzare

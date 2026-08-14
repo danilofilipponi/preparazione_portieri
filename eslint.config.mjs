@@ -44,6 +44,15 @@ const eslintConfig = defineConfig([
       "@typescript-eslint/no-explicit-any": "warn",
     },
   },
+  {
+    files: ["app/dev/**/*.{ts,tsx}"],
+    rules: {
+      // DEV-only diagnostics intentionally derive local UI state from loaded audit data.
+      "react-hooks/set-state-in-effect": "off",
+      // Large read-only audit tables use explicit memoization and are never shipped as user flows.
+      "react-hooks/preserve-manual-memoization": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

@@ -7,7 +7,7 @@ import { generateTacticalDiagram } from "../../../lib/tactical-diagram";
 import { validateTacticalSetup, type TacticalSetupValidation } from "../../../lib/tactical-setup-validation";
 import type { Exercise } from "../../../lib/types";
 
-const base:Exercise={id:"setup-dev",codice:"GK-SETUP",nome:"Setup",category_id:1,subcategory_id:1,categoria:"Tecnica",sottocategoria:"Setup",fase:"Analitico",obiettivo:"Validazione setup",descrizione:"",durata_min:10,portieri_min:1,portieri_max:2,intensita:"Media",difficolta:2,materiale:"Palloni",variante:null,coaching_points:"",errori_comuni:"",schema_step_1:null,schema_step_2:null,schema_step_3:null,schema_step_4:null,schema_step_5:null,schema_step_6:null,scenario_gara:null,numero_azioni:null,schema_url:null,foto_url:null,attivo:true};
+const base:Exercise={id:"setup-dev",codice:"GK-SETUP",nome:"Setup",category_id:1,subcategory_id:1,categoria:"Tecnica",sottocategoria:"Setup",fase:"Analitico",obiettivo:"Validazione setup",descrizione:"",durata_min:10,portieri_min:1,portieri_max:2,intensita:"Media",difficolta:2,materiale:"Palloni",variante:null,coaching_points:"",errori_comuni:"",schema_step_1:null,schema_step_2:null,schema_step_3:null,schema_step_4:null,schema_step_5:null,schema_step_6:null,scenario_gara:null,numero_azioni:null,attivo:true};
 
 const cases:Array<[string,Partial<Exercise>]> = [
   ["CONI",{nome:"Partenza tra due coni",descrizione:"Il GK parte tra due coni e interviene sul tiro.",materiale:"Palloni, 2 coni"}],

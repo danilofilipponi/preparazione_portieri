@@ -49,7 +49,7 @@ export function ExercisePhysicalObjectivesEditor({ mappings, objectives, busyId,
     setNewDraft({ physical_objective_id: "", ruolo: "Complementare", peso: 3, motivazione: "" });
   }
   return <section className="exercise-physical-editor field full">
-    <div className="exercise-images-title"><span>Obiettivi fisici associati</span><button type="button" className="secondary compact-button" disabled={!available.length} onClick={() => setAdding(value => !value)}>+ Aggiungi obiettivo</button></div>
+    <div className="exercise-editor-section-title"><span>Obiettivi fisici associati</span><button type="button" className="secondary compact-button" disabled={!available.length} onClick={() => setAdding(value => !value)}>+ Aggiungi obiettivo</button></div>
     <p className="mapping-editor-note">Il ruolo Principale è unico: impostandone uno nuovo, quello precedente diventa automaticamente Secondario.</p>
     {adding && <div className="physical-mapping-row new-mapping-row">
       <label className="mapping-objective-select"><span>Obiettivo fisico</span><select value={newDraft.physical_objective_id} onChange={event => setNewDraft(current => ({ ...current, physical_objective_id: event.target.value }))}><option value="">Seleziona…</option>{available.map(objective => <option key={objective.id} value={objective.id}>{objective.macro_area} &gt; {objective.obiettivo_fisico}</option>)}</select></label>

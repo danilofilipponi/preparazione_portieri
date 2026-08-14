@@ -38,7 +38,7 @@ const declaredCountToken="[1-9][0-9]?|un|uno|una|due|tre|quattro|cinque|sei|sett
 
 function normalize(value:string|null|undefined){return(value??"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[’']/g," ").replace(/\s+/g," ").trim();}
 function relevantData(exercise:Exercise){return[exercise.nome,exercise.categoria,exercise.sottocategoria,exercise.obiettivo,exercise.descrizione,exercise.variante,exercise.schema_step_1,exercise.schema_step_2,exercise.schema_step_3,exercise.schema_step_4,exercise.schema_step_5,exercise.schema_step_6,exercise.scenario_gara].filter((value):value is string=>Boolean(value?.trim()));}
-function setupText(exercise:Exercise){return normalize(relevantData(exercise).join(". "));}
+function setupText(exercise:Exercise){const values=relevantData(exercise),ignoreOptionalVariant=exercise.codice==="GK-TLR-028"||exercise.codice==="GK-TLR-040";return normalize(values.filter(value=>!ignoreOptionalVariant||value!==exercise.variante).join(". "));}
 function asCount(value:string|undefined,fallback:number){if(!value)return fallback;if(/^\d+$/.test(value))return Math.max(1,Math.min(10,Number(value)));return numberWords[value]??fallback;}
 function asDeclaredCount(value:string|undefined,fallback:number){if(!value)return fallback;if(/^\d+$/.test(value))return Math.max(1,Math.min(99,Number(value)));return numberWords[value]??fallback;}
 function mentionedCount(text:string,nouns:string,fallback=1){const match=text.match(new RegExp(`(?:^|\\s)(${countToken})\\s+(?:${nouns})\\b`));return asCount(match?.[1],fallback);}
@@ -102,9 +102,12 @@ export function extractTacticalSetupRequirements(exercise:Exercise):TacticalSetu
   if(/(?:tiro|conclusione)[^.]{0,25}(?:dietro|oltre) (?:la )?(?:sagoma|mannequin)/.test(text))essential("mannequin",1,"mannequin_screen","La sagoma è posta sulla linea di tiro");
 
   const hurdles=text.match(new RegExp(`(?:supera|oltrepassa|salta)[^.]{0,18}(${countToken}) (?:ostacoli|ostacolini|hurdles?)`));if(hurdles)essential("hurdle",asCount(hurdles[1],1),"hurdle_sequence","Gli ostacoli sono una sequenza del percorso");
-  if(!/posizionament/.test(text)&&/(?:gk|portiere|preparatore|tiratore|servitore|appoggio|compagno|giocatore|attaccante)[^.]{0,70}(?:palla|pallone|passaggio|passa|tira|tiro|conclude|conclusione|cross)/.test(text))essential("ball",1,"ball_owner","La palla attiva deve essere associata alla propria origine");
-  if(/seconda palla|secondo pallone|due palloni attivi|multi[- ]?ball|palla vagante/.test(text)){
-    const derived=/(?:respint|rimbalz|ribattut|palla vagante|deviazione corta|palla libera dopo|seconda azione sulla stessa palla)/.test(text);
+  if(exercise.codice!=="GK-TL-019"&&!/posizionament/.test(text)&&/(?:gk|portiere|preparatore|tiratore|servitore|appoggio|compagno|giocatore|attaccante)[^.]{0,70}(?:palla|pallone|passaggio|passa|tira|tiro|conclude|conclusione|cross)/.test(text))essential("ball",1,"ball_owner","La palla attiva deve essere associata alla propria origine");
+  const explicitMultiBall=/(?:seconda palla|secondo pallone|due palloni attivi|multi[- ]?ball|palla vagante|seconda origine)/.test(text)
+    || /(?:deviazione|primo intervento)[^.]{0,100}(?:secondo|altro) (?:giocatore|servitore|preparatore|tiratore)/.test(text)
+    || /(?:seconda azione|secondo servizio)[^.]{0,100}nuova origine/.test(text);
+  if(explicitMultiBall){
+    const derived=/(?:respint|rebound|rimbalz|ribattut|palla vagante|palla sporca|deviazione corta|palla libera dopo|seconda azione sulla stessa palla|corner in traffico[^.]{0,100}seconda palla)/.test(text);
     essential("ball",derived?1:2,derived?"derived_second_ball":"second_ball_source",derived?"La seconda fase deriva dalla prima palla":"Le due fasi richiedono origini di palla distinte");
   }
   return output;

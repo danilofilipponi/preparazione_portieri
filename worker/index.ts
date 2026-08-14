@@ -29,6 +29,18 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    // Diagnostic pages remain available to local development, but must never be
+    // exposed by the production Worker.
+    if (process.env.NODE_ENV === "production" && (url.pathname === "/dev" || url.pathname.startsWith("/dev/"))) {
+      return new Response("Not Found", {
+        status: 404,
+        headers: {
+          "cache-control": "no-store",
+          "content-type": "text/plain; charset=utf-8",
+        },
+      });
+    }
+
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(request, {

@@ -3,9 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import type { AppSettings, CalendarDay, CalendarException, CatalogPhase, DiagramSource, EditableExerciseSelection, EditableGeneratedSession, Exercise, ExerciseCategory, ExerciseDifficulty, ExercisePhysicalObjective, ExerciseSubcategory, GenerationMode, Goalkeeper, PhysicalAssessmentDimension, PhysicalObjective, PriorityRankingItem, ScoredExerciseCandidate, Season, SeasonMatch, SeasonPhaseConfig, SeasonRecallPeriod, SeasonTrainingProfile, SessionBlock, SessionProfile, SessionQualityResult, TacticalDiagram, Training, TrainingExerciseVariant } from "../lib/types";
-import { deleteExerciseImage, isAcceptedExerciseImage, parseExerciseImageName, uploadExerciseImage, type ExerciseImageKind } from "../lib/exercise-images";
 import { ExerciseCard } from "./components/exercise-card";
-import { BulkImageImportModal, ExerciseImageField, type BulkImageSummary } from "./components/exercise-image-tools";
 import { PhysicalObjectivesPage } from "./components/physical-objectives";
 import { ExercisePhysicalObjectivesEditor, type PhysicalMappingDraft } from "./components/exercise-physical-objectives-editor";
 import { SeasonSettings, type SeasonConfiguration } from "./components/season-settings";
@@ -23,8 +21,12 @@ import { SessionOverviewHeader } from "./components/session-overview-header";
 import { groupSessionExercises, type SessionDisplayExercise } from "../lib/session-visualization";
 import { generateTacticalDiagram, normalizeTacticalDiagram } from "../lib/tactical-diagram";
 import { TacticalDiagramEditor } from "./components/tactical-diagram-editor";
+import { EvaluationSessionWizard } from "./components/evaluation-session-wizard";
+import { EvaluationFieldMode } from "./components/evaluation-field-mode";
+import { ReassessmentWizard } from "./components/reassessment-wizard";
+import { buildGoalkeeperEvaluationHistory, type EvaluationHistoryInput, type GoalkeeperEvaluationHistorySession } from "../lib/evaluation-history";
 
-type Section = "archive" | "builder" | "agenda" | "physical" | "goalkeepers";
+type Section = "archive" | "builder" | "agenda" | "physical" | "goalkeepers" | "evaluation";
 type ExerciseDraft = Omit<Exercise, "id" | "category" | "subcategory" | "physical_mappings">;
 
 const emptyExercise: ExerciseDraft = {
@@ -36,7 +38,7 @@ const emptyExercise: ExerciseDraft = {
   schema_step_3: null, schema_step_4: null, schema_step_5: null,
   schema_step_6: null,
   scenario_gara: null, numero_azioni: null,
-  schema_url: null, foto_url: null, attivo: true,
+  attivo: true,
   tactical_diagram: null, diagram_source: null, diagram_updated_at: null,
 };
 
@@ -128,8 +130,6 @@ function normalizeExercise(record: Record<string, unknown>): Exercise {
     schema_step_6: record.schema_step_6 ? String(record.schema_step_6) : null,
     scenario_gara: record.scenario_gara ? String(record.scenario_gara) : null,
     numero_azioni: record.numero_azioni ? String(record.numero_azioni) : null,
-    schema_url: (record.schema_url ?? record.immagine_url ?? null) as string | null,
-    foto_url: (record.foto_url ?? null) as string | null,
     tactical_diagram: normalizeTacticalDiagram(record.tactical_diagram),
     diagram_source: (["automatic", "manual", "automatic_edited"].includes(String(record.diagram_source)) ? record.diagram_source : null) as DiagramSource | null,
     diagram_updated_at: record.diagram_updated_at ? String(record.diagram_updated_at) : null,
@@ -147,6 +147,9 @@ export function KeeperApp() {
   const [physicalObjectives, setPhysicalObjectives] = useState<PhysicalObjective[]>([]);
   const [physicalAssessmentDimensions, setPhysicalAssessmentDimensions] = useState<PhysicalAssessmentDimension[]>([]);
   const [goalkeepers, setGoalkeepers] = useState<Goalkeeper[]>([]);
+  const [evaluationHistory, setEvaluationHistory] = useState<GoalkeeperEvaluationHistorySession[]>([]);
+  const [historyEvaluationSessionId, setHistoryEvaluationSessionId] = useState<string | null>(null);
+  const [reassessmentBaselineId, setReassessmentBaselineId] = useState<string | null>(null);
   const [trainings, setTrainings] = useState<Training[]>([]);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [season, setSeason] = useState<Season | null>(null);
@@ -196,14 +199,13 @@ export function KeeperApp() {
   const [openExercise, setOpenExercise] = useState<Exercise | null>(null);
   const [sessionExerciseDetail, setSessionExerciseDetail] = useState<{ exercise: Exercise; plannedDuration: number; variants: TrainingExerciseVariant[] } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [bulkImageOpen, setBulkImageOpen] = useState(false);
   const [bulkDiagramOpen, setBulkDiagramOpen] = useState(false);
   const [catalogAdmin, setCatalogAdmin] = useState(false);
   const [seasonSettingsOpen, setSeasonSettingsOpen] = useState(false);
   const [openCalendarDay, setOpenCalendarDay] = useState<CalendarDay | null>(null);
 
   const loadExercises = useCallback(async () => {
-    if (!supabase) return;
+    if (!supabase || !window.confirm("Eliminare definitivamente questa seduta?")) return;
     let { data, error } = await supabase.from("exercises").select("*, category:exercise_categories(*), subcategory:exercise_subcategories(*), physical_mappings:exercise_physical_objectives(id,exercise_id,physical_objective_id,ruolo,peso,motivazione,attivo,physical_objective:physical_objectives(*))").order("codice");
     if (error) {
       const legacyResult = await supabase.from("exercises").select("*, category:exercise_categories(*), subcategory:exercise_subcategories(*)").order("codice");
@@ -220,7 +222,7 @@ export function KeeperApp() {
   }, []);
 
   const loadCatalog = useCallback(async () => {
-    if (!supabase) return;
+    if (!supabase || !window.confirm("Eliminare definitivamente questa seduta?")) return;
     const [categoryResult, subcategoryResult] = await Promise.all([
       supabase.from("exercise_categories").select("id,nome,attivo").eq("attivo", true).order("id"),
       supabase.from("exercise_subcategories").select("id,category_id,nome,fase,attivo").eq("attivo", true).order("id"),
@@ -234,7 +236,7 @@ export function KeeperApp() {
   }, []);
 
   const loadPhysicalObjectives = useCallback(async () => {
-    if (!supabase) return;
+    if (!supabase || !window.confirm("Eliminare definitivamente questa seduta?")) return;
     const { data, error } = await supabase.from("physical_objectives").select("*").eq("attivo", true).order("codice");
     if (!error) setPhysicalObjectives((data ?? []) as PhysicalObjective[]);
   }, []);
@@ -269,7 +271,7 @@ export function KeeperApp() {
     if (!supabase) return;
     let { data, error } = await supabase
       .from("trainings")
-      .select("id, training_date, planned_duration_minutes, goalkeeper_count, notes, status, physical_objective_id, season_id, calendar_day_id, season_phase_id, session_number, session_type, technical_objective_primary, technical_objective_secondary, planned_load, match_day_offset, athletic_recall, generated_by_calendar, content_status, generation_mode, focus_source, technical_focus_primary_category_id, technical_focus_secondary_category_id, physical_focus_dimension_id, session_profile_code, session_profile_snapshot, technical_ranking_snapshot, physical_ranking_snapshot, generation_reason_snapshot,session_generation_snapshot,current_quality_snapshot,regeneration_count,revision_number,confirmed_at, physical_objective:physical_objectives(*), training_objectives(objective), training_exercises(id, position, planned_duration_minutes, notes,training_block_id,block_position,exercise_score,selection_snapshot,fallback_level,individual_variant_suggestion,locked,source,replacement_reason,replacement_note,variants:training_exercise_goalkeeper_variants(training_exercise_id,goalkeeper_id,tipo,variante_individuale,motivazione,priority_source,difficolta_delta,note), exercise:exercises(*)), training_goalkeepers(goalkeeper_id,individual_focus), training_blocks(id,training_id,tipo_blocco,ordine,durata_target,fase_metodologica_preferita,carico_target,technical_category_id,physical_dimension_id,notes,transition_minutes,regeneration_count)")
+      .select("id, training_date, planned_duration_minutes, goalkeeper_count, notes, status, physical_objective_id, season_id, calendar_day_id, season_phase_id, session_number, session_type, technical_objective_primary, technical_objective_secondary, planned_load, match_day_offset, athletic_recall, generated_by_calendar, content_status, generation_mode, focus_source, technical_focus_primary_category_id, technical_focus_secondary_category_id, physical_focus_dimension_id, session_profile_code, session_profile_snapshot, technical_ranking_snapshot, physical_ranking_snapshot, generation_reason_snapshot,session_generation_snapshot,current_quality_snapshot,regeneration_count,revision_number,confirmed_at, physical_objective:physical_objectives(*), evaluation_session:evaluation_sessions(id,evaluation_type,status,goalkeeper_id,minimum_observations,context_preference,started_at,completed_at), training_objectives(objective), training_exercises(id, position, planned_duration_minutes, notes,training_block_id,block_position,exercise_score,selection_snapshot,fallback_level,individual_variant_suggestion,locked,source,replacement_reason,replacement_note,variants:training_exercise_goalkeeper_variants(training_exercise_id,goalkeeper_id,tipo,variante_individuale,motivazione,priority_source,difficolta_delta,note), exercise:exercises(*)), training_goalkeepers(goalkeeper_id,individual_focus), training_blocks(id,training_id,tipo_blocco,ordine,durata_target,fase_metodologica_preferita,carico_target,technical_category_id,physical_dimension_id,notes,transition_minutes,regeneration_count)")
       .order("training_date");
     if (error) {
       const legacyResult = await supabase
@@ -292,8 +294,56 @@ export function KeeperApp() {
         })),
         training_blocks: "training_blocks" in training && Array.isArray(training.training_blocks) ? [...training.training_blocks].sort((a, b) => Number(a.ordine) - Number(b.ordine)) : [],
         training_goalkeepers: "training_goalkeepers" in training && Array.isArray(training.training_goalkeepers) ? training.training_goalkeepers : [],
+        evaluation_session: "evaluation_session" in training ? (Array.isArray(training.evaluation_session) ? training.evaluation_session[0] ?? null : training.evaluation_session ?? null) : null,
       }));
       setTrainings(normalized as unknown as Training[]);
+    }
+  }, []);
+
+  const loadEvaluationHistory = useCallback(async () => {
+    if (!supabase) return;
+    const client = supabase;
+    const pageSize = 750;
+    async function paged<T>(request: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>) {
+      const rows: T[] = [];
+      for (let from = 0; ; from += pageSize) {
+        const result = await request(from, from + pageSize - 1);
+        if (result.error) throw new Error(result.error.message);
+        const page = (result.data ?? []) as T[];
+        rows.push(...page);
+        if (page.length < pageSize) return rows;
+      }
+    }
+    try {
+      const sessions = await paged<EvaluationHistoryInput["sessions"][number]>(async (from, to) => {
+        const result = await client.from("evaluation_sessions").select("id,training_id,goalkeeper_id,evaluation_type,previous_evaluation_session_id,status,scale_id,started_at,completed_at").eq("status", "Completed").not("completed_at", "is", null).order("completed_at", { ascending: false }).range(from, to);
+        return { data: result.data as unknown[] | null, error: result.error };
+      });
+      if (!sessions.length) { setEvaluationHistory([]); return; }
+      const [trainingsData, targets, exerciseTargets, observations, trainingExercises] = await Promise.all([
+        paged<EvaluationHistoryInput["trainings"][number]>(async (from, to) => { const result = await client.from("trainings").select("id,training_date,planned_duration_minutes").order("training_date", { ascending: false }).range(from, to); return { data: result.data as unknown[] | null, error: result.error }; }),
+        paged<EvaluationHistoryInput["targets"][number]>(async (from, to) => { const result = await client.from("evaluation_session_targets").select("id,evaluation_session_id,target_type,technical_subcategory_id,physical_objective_id,physical_dimension_id,parameter_name_snapshot,coverage_status").range(from, to); return { data: result.data as unknown[] | null, error: result.error }; }),
+        paged<EvaluationHistoryInput["exerciseTargets"][number]>(async (from, to) => { const result = await client.from("evaluation_exercise_targets").select("id,evaluation_session_id,training_exercise_id,session_target_id,observability_weight,selection_weight").range(from, to); return { data: result.data as unknown[] | null, error: result.error }; }),
+        paged<EvaluationHistoryInput["observations"][number]>(async (from, to) => { const result = await client.from("evaluation_observations").select("id,evaluation_exercise_target_id,score,observation_status,confidence,observed_at").order("observed_at").range(from, to); return { data: result.data as unknown[] | null, error: result.error }; }),
+        paged<EvaluationHistoryInput["trainingExercises"][number]>(async (from, to) => { const result = await client.from("training_exercises").select("id,training_id,exercise_id,exercise:exercises(id,codice,nome,fase)").range(from, to); return { data: result.data as unknown[] | null, error: result.error }; }),
+      ]);
+      const sessionIds = new Set(sessions.map(item => item.id));
+      const trainingIds = new Set(sessions.map(item => item.training_id));
+      const relevantTargets = targets.filter(item => sessionIds.has(item.evaluation_session_id));
+      const relevantTargetIds = new Set(relevantTargets.map(item => item.id));
+      const relevantLinks = exerciseTargets.filter(item => sessionIds.has(item.evaluation_session_id) && relevantTargetIds.has(item.session_target_id));
+      const relevantLinkIds = new Set(relevantLinks.map(item => item.id));
+      setEvaluationHistory(buildGoalkeeperEvaluationHistory({
+        sessions,
+        trainings: trainingsData.filter(item => trainingIds.has(item.id)),
+        targets: relevantTargets,
+        exerciseTargets: relevantLinks,
+        observations: observations.filter(item => relevantLinkIds.has(item.evaluation_exercise_target_id)),
+        trainingExercises: trainingExercises.filter(item => trainingIds.has(item.training_id)).map(item => ({ ...item, exercise: Array.isArray(item.exercise) ? item.exercise[0] ?? null : item.exercise })),
+      }));
+    } catch (error) {
+      setEvaluationHistory([]);
+      setToast(`Storico valutativo non disponibile: ${readableError(error)}`);
     }
   }, []);
 
@@ -347,10 +397,10 @@ export function KeeperApp() {
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      void Promise.all([loadCatalog(), loadExercises(), loadPhysicalObjectives(), loadGoalkeepers(), loadTrainings(), loadSettings(), loadSeasonCalendar(), loadCatalogAccess()]).finally(() => setLoading(false));
+      void Promise.all([loadCatalog(), loadExercises(), loadPhysicalObjectives(), loadGoalkeepers(), loadTrainings(), loadEvaluationHistory(), loadSettings(), loadSeasonCalendar(), loadCatalogAccess()]).finally(() => setLoading(false));
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [loadCatalog, loadExercises, loadPhysicalObjectives, loadGoalkeepers, loadTrainings, loadSettings, loadSeasonCalendar, loadCatalogAccess]);
+  }, [loadCatalog, loadExercises, loadPhysicalObjectives, loadGoalkeepers, loadTrainings, loadEvaluationHistory, loadSettings, loadSeasonCalendar, loadCatalogAccess]);
 
   useEffect(() => {
     if (!toast) return;
@@ -690,22 +740,13 @@ export function KeeperApp() {
     setToast("Eccezione rimossa");
   }
 
-  async function saveExercise(draft: ExerciseDraft, schemaImage: File | null, photoImage: File | null) {
+  async function saveExercise(draft: ExerciseDraft) {
     if (!supabase) return;
     const existing = editingExercise !== "new" ? editingExercise : null;
-    async function upload(file: File | null, kind: "schema" | "foto", current: string | null) {
-      if (!file) return current;
-      return uploadExerciseImage(draft.codice, kind, file, current);
-    }
-    let schemaUrl: string | null;
-    let photoUrl: string | null;
-    try {
-      [schemaUrl, photoUrl] = await Promise.all([upload(schemaImage, "schema", existing?.schema_url ?? draft.schema_url), upload(photoImage, "foto", existing?.foto_url ?? draft.foto_url)]);
-    } catch (error) { setToast(`Immagine non caricata: ${error instanceof Error ? error.message : "errore"}`); return; }
     const selectedCategory = exerciseCategories.find(item => item.id === draft.category_id);
     const selectedSubcategory = exerciseSubcategories.find(item => item.id === draft.subcategory_id);
     if (!selectedCategory || !selectedSubcategory || selectedSubcategory.fase === "Generale") { setToast("Categoria o sottocategoria non valida"); return; }
-    const payload = { ...draft, categoria: selectedCategory.nome, sottocategoria: selectedSubcategory.nome, fase: selectedSubcategory.fase, variante: draft.variante || null, schema_url: schemaUrl, foto_url: photoUrl };
+    const payload = { ...draft, categoria: selectedCategory.nome, sottocategoria: selectedSubcategory.nome, fase: selectedSubcategory.fase, variante: draft.variante || null };
     const result = existing
       ? await supabase.from("exercises").update(payload).eq("id", existing.id)
       : await supabase.from("exercises").insert(payload);
@@ -739,72 +780,6 @@ export function KeeperApp() {
     if (error) { setToast(`Associazione non rimossa: ${error.message}`); return; }
     await loadExercises();
     setToast("Associazione rimossa");
-  }
-
-  function applyImageUrl(exerciseId: string, kind: ExerciseImageKind, url: string | null) {
-    const field = kind === "schema" ? "schema_url" : "foto_url";
-    setExercises(current => current.map(item => item.id === exerciseId ? { ...item, [field]: url } : item));
-    setOpenExercise(current => current?.id === exerciseId ? { ...current, [field]: url } : current);
-    setEditingExercise(current => current && current !== "new" && current.id === exerciseId ? { ...current, [field]: url } : current);
-  }
-
-  async function changeExerciseImage(exercise: Exercise, kind: ExerciseImageKind, file: File | null) {
-    if (!supabase) throw new Error("Supabase non configurato");
-    const field = kind === "schema" ? "schema_url" : "foto_url";
-    const currentUrl = exercise[field];
-    try {
-      let nextUrl: string | null = null;
-      if (file) nextUrl = await uploadExerciseImage(exercise.codice, kind, file, currentUrl);
-      else await deleteExerciseImage(exercise.codice, kind, currentUrl);
-      const { error } = await supabase.from("exercises").update({ [field]: nextUrl }).eq("id", exercise.id);
-      if (error) throw error;
-      applyImageUrl(exercise.id, kind, nextUrl);
-      setToast(file ? `${kind === "schema" ? "Schema tecnico" : "Foto dimostrativa"} caricato con successo` : "Immagine eliminata");
-      return nextUrl;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "errore sconosciuto";
-      setToast(`Operazione immagine non riuscita: ${message}`);
-      throw error;
-    }
-  }
-
-  async function importExerciseImages(files: File[], onProgress: (summary: BulkImageSummary) => void) {
-    const summary: BulkImageSummary = { total: files.length, processed: 0, schemas: 0, photos: 0, errors: [] };
-    if (!supabase) {
-      summary.errors.push("Supabase non configurato");
-      summary.processed = files.length;
-      onProgress({ ...summary, errors: [...summary.errors] });
-      return summary;
-    }
-    const exercisesByCode = new Map(exercises.map(exercise => [exercise.codice.toUpperCase(), exercise]));
-    const seen = new Set<string>();
-
-    for (const file of files) {
-      const parsed = parseExerciseImageName(file.name);
-      try {
-        if (!parsed || !isAcceptedExerciseImage(file)) throw new Error(`${file.name}: nome o formato non riconosciuto`);
-        const exercise = exercisesByCode.get(parsed.codice);
-        if (!exercise) throw new Error(`${file.name}: codice ${parsed.codice} non presente nel database`);
-        const key = `${parsed.codice}:${parsed.kind}`;
-        if (seen.has(key)) throw new Error(`${file.name}: immagine duplicata nella selezione`);
-        seen.add(key);
-        const field = parsed.kind === "schema" ? "schema_url" : "foto_url";
-        const nextUrl = await uploadExerciseImage(exercise.codice, parsed.kind, file, exercise[field]);
-        const { error } = await supabase.from("exercises").update({ [field]: nextUrl }).eq("id", exercise.id);
-        if (error) throw error;
-        exercise[field] = nextUrl;
-        applyImageUrl(exercise.id, parsed.kind, nextUrl);
-        if (parsed.kind === "schema") summary.schemas += 1;
-        else summary.photos += 1;
-      } catch (error) {
-        summary.errors.push(error instanceof Error ? error.message : `${file.name}: errore sconosciuto`);
-      }
-      summary.processed += 1;
-      onProgress({ ...summary, errors: [...summary.errors] });
-    }
-    await loadExercises();
-    setToast(summary.errors.length ? `Importazione completata con ${summary.errors.length} errori` : "Importazione immagini completata con successo");
-    return { ...summary, errors: [...summary.errors] };
   }
 
   async function deleteExercise(exercise: Exercise) {
@@ -893,7 +868,8 @@ export function KeeperApp() {
   const technicalNav = [{ id: "archive" as const, icon: "▦", label: "Archivio esercizi" }];
   const physicalNav = [{ id: "physical" as const, icon: "◇", label: "Obiettivi fisici" }];
   const teamNav = [{ id: "goalkeepers" as const, icon: "♙", label: "Portieri" }];
-  const nav = [...trainingNav, ...technicalNav, ...physicalNav, ...teamNav];
+  const evaluationNav = [{ id: "evaluation" as const, icon: "✓", label: "Nuova valutazione" }];
+  const nav = [...trainingNav, ...evaluationNav, ...technicalNav, ...physicalNav, ...teamNav];
 
   return (
     <div className="app-shell">
@@ -901,6 +877,8 @@ export function KeeperApp() {
         <div className="brand"><span className="brand-mark">K</span> KeeperLab</div>
         <div className="side-label">Allenamento</div>
         {trainingNav.map(item => <button key={item.id} className={`nav-button ${section === item.id ? "active" : ""}`} onClick={() => { setSection(item.id); if (item.id === "agenda") setSeasonSettingsOpen(false); }}><span className="nav-icon">{item.icon}</span>{item.label}</button>)}
+        <div className="side-label group-side-label">Valutazione</div>
+        {evaluationNav.map(item => <button key={item.id} className={`nav-button ${section === item.id ? "active" : ""}`} onClick={() => { setReassessmentBaselineId(null); setSection(item.id); }}><span className="nav-icon">{item.icon}</span>{item.label}</button>)}
         <div className="side-label group-side-label">Area tecnica</div>
         {technicalNav.map(item => <button key={item.id} className={`nav-button ${section === item.id ? "active" : ""}`} onClick={() => setSection(item.id)}><span className="nav-icon">{item.icon}</span>{item.label}</button>)}
         <div className="side-label group-side-label">Preparazione fisica</div>
@@ -914,9 +892,12 @@ export function KeeperApp() {
         <header className="topbar"><span className="eyebrow">{settings.club_name ? `${settings.club_name} · ` : ""}{settings.team_name} · {settings.season}</span><div className="topbar-actions"><span className="online">● {isSupabaseConfigured ? "Supabase connesso" : "Configurazione mancante"}</span><button className="settings-button" aria-label="Apri impostazioni" title="Impostazioni" onClick={() => setSettingsOpen(true)}>⚙</button><button className="logout-button" aria-label="Esci dall’app" title="Esci" onClick={signOut}>↪</button></div></header>
         <div className="content">
           {loading ? <div className="loading-state">Caricamento archivio e agenda…</div> : null}
-          {!loading && section === "archive" && <Archive exercises={filtered} categories={exerciseCategories} subcategories={availableSubcategories} physicalObjectives={physicalObjectives} search={search} setSearch={setSearch} categoryFilter={categoryFilter} setCategoryFilter={value => { setCategoryFilter(value); setSubcategoryFilter("all"); }} subcategoryFilter={subcategoryFilter} setSubcategoryFilter={setSubcategoryFilter} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} intensityFilter={intensityFilter} setIntensityFilter={setIntensityFilter} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter} physicalObjectiveFilter={physicalObjectiveFilter} setPhysicalObjectiveFilter={setPhysicalObjectiveFilter} onNew={() => setEditingExercise("new")} onImportImages={() => setBulkImageOpen(true)} onGenerateMissing={catalogAdmin ? () => setBulkDiagramOpen(true) : undefined} onOpen={setOpenExercise} onEdit={setEditingExercise} onDelete={deleteExercise} />}
+          {!loading && section === "archive" && <Archive exercises={filtered} categories={exerciseCategories} subcategories={availableSubcategories} physicalObjectives={physicalObjectives} search={search} setSearch={setSearch} categoryFilter={categoryFilter} setCategoryFilter={value => { setCategoryFilter(value); setSubcategoryFilter("all"); }} subcategoryFilter={subcategoryFilter} setSubcategoryFilter={setSubcategoryFilter} phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter} intensityFilter={intensityFilter} setIntensityFilter={setIntensityFilter} difficultyFilter={difficultyFilter} setDifficultyFilter={setDifficultyFilter} physicalObjectiveFilter={physicalObjectiveFilter} setPhysicalObjectiveFilter={setPhysicalObjectiveFilter} onNew={() => setEditingExercise("new")} onGenerateMissing={catalogAdmin ? () => setBulkDiagramOpen(true) : undefined} onOpen={setOpenExercise} onEdit={setEditingExercise} onDelete={deleteExercise} />}
           {!loading && section === "physical" && <PhysicalObjectivesPage objectives={physicalObjectives} />}
-          {!loading && section === "goalkeepers" && <GoalkeepersPage goalkeepers={goalkeepers} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} onSaveGoalkeeper={saveGoalkeeper} onDeactivate={deactivateGoalkeeper} onSaveAssessment={saveGoalkeeperAssessment} />}
+          {!loading && section === "goalkeepers" && <GoalkeepersPage goalkeepers={goalkeepers} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} evaluationHistory={evaluationHistory} onOpenEvaluationResults={setHistoryEvaluationSessionId} onCreateEvaluation={() => { setReassessmentBaselineId(null); setSection("evaluation"); }} onReassess={sessionId => { setReassessmentBaselineId(sessionId); setSection("evaluation"); }} onSaveGoalkeeper={saveGoalkeeper} onDeactivate={deactivateGoalkeeper} onSaveAssessment={saveGoalkeeperAssessment} />}
+          {!loading && section === "evaluation" && (reassessmentBaselineId && evaluationHistory.find(item => item.id === reassessmentBaselineId)
+            ? <ReassessmentWizard baseline={evaluationHistory.find(item => item.id === reassessmentBaselineId)!} exercises={exercises} subcategories={exerciseSubcategories} physicalObjectives={physicalObjectives} goalkeepers={goalkeepers} onCancel={() => { setReassessmentBaselineId(null); setSection("goalkeepers"); }} onCreated={async () => { await Promise.all([loadTrainings(), loadEvaluationHistory()]); setReassessmentBaselineId(null); setSection("agenda"); }} onToast={setToast} />
+            : <EvaluationSessionWizard exercises={exercises} subcategories={exerciseSubcategories} physicalObjectives={physicalObjectives} physicalDimensions={physicalAssessmentDimensions} goalkeepers={goalkeepers} catalogAdmin={catalogAdmin} onCreated={async () => { await Promise.all([loadTrainings(), loadEvaluationHistory()]); setSection("agenda"); }} onToast={setToast} />)}
           {!loading && section === "builder" && <SessionPlanner editing={Boolean(editingTrainingId)} date={date} duration={duration} keepers={keepers} mode={generationMode} seasonPhase={seasonPhases.find(item=>date>=item.data_inizio&&date<=item.data_fine)?.tipo??"Non specificata"} profile={sessionProfile} goalkeepers={goalkeepers} selectedGoalkeeperIds={selectedGoalkeeperIds} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} technicalRanking={technicalRanking} physicalRanking={physicalRanking} technicalFocusId={technicalFocusId} technicalSecondaryFocusId={technicalSecondaryFocusId} physicalFocusId={physicalFocusId} blocks={sessionBlocks} generatedExercises={generatedExercises} quality={sessionQuality} confirmed={sessionConfirmed} onDate={value => { setDate(value); setGeneratedExercises(null); }} onDuration={value => { setDuration(value); setSessionProfile(null); setSessionBlocks([]); setGeneratedExercises(null); }} onKeepers={value => { setKeepers(value); setGeneratedExercises(null); }} onMode={setGenerationMode} onGoalkeepers={value => { setSelectedGoalkeeperIds(value); setGeneratedExercises(null); }} onTechnicalFocus={value => { setTechnicalFocusId(value); setGeneratedExercises(null); if (sessionProfile) setSessionBlocks(buildSessionBlocks(sessionProfile, value, physicalFocusId)); }} onTechnicalSecondaryFocus={value => { setTechnicalSecondaryFocusId(value); setGeneratedExercises(null); }} onPhysicalFocus={value => { setPhysicalFocusId(value); setGeneratedExercises(null); if (sessionProfile) setSessionBlocks(buildSessionBlocks(sessionProfile, technicalFocusId, value)); }} onBlocks={value => { setSessionBlocks(value); setGeneratedExercises(null); }} onGenerate={generateSessionPlan} onGenerateExercises={generateExercisePlan} onOpenExercise={(exercise,plannedDuration,variants)=>setSessionExerciseDetail({exercise:exercises.find(item=>item.id===exercise.id)??exercise,plannedDuration,variants})} onToggleLock={toggleExerciseLock} onExerciseDuration={changePlannedDuration} onRemove={removeGeneratedExercise} onReplace={openReplacement} onVariants={openVariants} onMove={moveGeneratedExercise} onRegenerateBlock={regenerateOneBlock} onRegenerateSession={regenerateAllExercises} onRecalculateAll={recalculateWholeSession} onAdd={setManualPickerBlock} onConfirm={()=>setSessionConfirmed(true)} onSave={saveSession} />}
           {!loading && section === "agenda" && (seasonSettingsOpen
             ? <SeasonSettings settings={settings} season={season} phases={seasonPhases} recall={seasonRecall} profiles={seasonProfiles} matches={seasonMatches} exceptions={calendarExceptions} busy={seasonBusy} onClose={() => setSeasonSettingsOpen(false)} onSave={saveSeasonConfiguration} onGenerate={generateSeasonAgenda} onSaveMatch={saveSeasonMatch} onDeleteMatch={deleteSeasonMatch} onSaveException={saveCalendarException} onDeleteException={deleteCalendarException} />
@@ -924,13 +905,13 @@ export function KeeperApp() {
         </div>
       </main>
 
-      <nav className="mobile-nav">{nav.map(item => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => setSection(item.id)}><b>{item.icon}</b>{item.label.replace(" settimanale", "")}</button>)}</nav>
+      <nav className="mobile-nav">{nav.map(item => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { if (item.id === "evaluation") setReassessmentBaselineId(null); setSection(item.id); }}><b>{item.icon}</b>{item.label.replace(" settimanale", "")}</button>)}</nav>
       {toast && <div className="toast" role="status">{toast}</div>}
-      {editingExercise && <ExerciseImageModal exercise={editingExercise === "new" ? null : editingExercise} categories={exerciseCategories} subcategories={exerciseSubcategories} physicalObjectives={physicalObjectives} onClose={() => setEditingExercise(null)} onSave={saveExercise} onImageChange={changeExerciseImage} onSavePhysicalMapping={saveExercisePhysicalMapping} onRemovePhysicalMapping={removeExercisePhysicalMapping} />}
+      {editingExercise && <ExerciseEditorModal exercise={editingExercise === "new" ? null : editingExercise} categories={exerciseCategories} subcategories={exerciseSubcategories} physicalObjectives={physicalObjectives} onClose={() => setEditingExercise(null)} onSave={saveExercise} onSavePhysicalMapping={saveExercisePhysicalMapping} onRemovePhysicalMapping={removeExercisePhysicalMapping} />}
       {openExercise && <ExerciseDetailModal exercise={openExercise} onClose={() => setOpenExercise(null)} onEdit={() => { setOpenExercise(null); setEditingExercise(openExercise); }} />}
-      {bulkImageOpen && <BulkImageImportModal onClose={() => setBulkImageOpen(false)} onImport={importExerciseImages} />}
       {bulkDiagramOpen && <BulkDiagramGenerationModal total={exercises.filter(exercise => !exercise.tactical_diagram).length} onClose={() => setBulkDiagramOpen(false)} onGenerate={generateMissingTacticalDiagrams} />}
-      {openTraining && <PlannerTrainingModal training={openTraining} catalog={exercises} goalkeepers={goalkeepers} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} seasonPhases={seasonPhases} onOpenExercise={(exercise,plannedDuration,variants)=>setSessionExerciseDetail({exercise,plannedDuration,variants})} onClose={() => setOpenTraining(null)} onEdit={() => startEditTraining(openTraining)} onDelete={() => deleteTraining(openTraining)} />}
+      {openTraining && <PlannerTrainingModal training={openTraining} catalog={exercises} goalkeepers={goalkeepers} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} seasonPhases={seasonPhases} onOpenExercise={(exercise,plannedDuration,variants)=>setSessionExerciseDetail({exercise,plannedDuration,variants})} onClose={() => setOpenTraining(null)} onEdit={() => startEditTraining(openTraining)} onDelete={() => deleteTraining(openTraining)} onSessionChanged={async () => { await Promise.all([loadTrainings(), loadEvaluationHistory()]); }} />}
+      {historyEvaluationSessionId && <EvaluationFieldMode sessionId={historyEvaluationSessionId} initialMode="results" onSessionChanged={async () => { await Promise.all([loadTrainings(), loadEvaluationHistory()]); }} onClose={() => setHistoryEvaluationSessionId(null)} />}
       {sessionExerciseDetail && <ExerciseDetailModal exercise={sessionExerciseDetail.exercise} plannedDuration={sessionExerciseDetail.plannedDuration} variants={sessionExerciseDetail.variants} goalkeepers={goalkeepers} onClose={() => setSessionExerciseDetail(null)} onEdit={() => { setSessionExerciseDetail(null); setOpenTraining(null); setEditingExercise(sessionExerciseDetail.exercise); }} />}
       {openCalendarDay && <CalendarDayModal day={openCalendarDay} trainings={trainings.filter(training => training.training_date === openCalendarDay.data)} onClose={() => setOpenCalendarDay(null)} onOpenTraining={training => { setOpenCalendarDay(null); setOpenTraining(training); }} onSaveException={saveCalendarException} />}
       {settingsOpen && <SettingsModal settings={settings} onClose={() => setSettingsOpen(false)} onSave={saveSettings} />}
@@ -945,7 +926,7 @@ function PageHead({ eyebrow, title, subtitle, action }: { eyebrow: string; title
   return <div className="page-head"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p className="subtitle">{subtitle}</p></div>{action}</div>;
 }
 
-type ArchiveProps = { exercises: Exercise[]; categories: ExerciseCategory[]; subcategories: string[]; physicalObjectives: PhysicalObjective[]; search: string; setSearch: (value: string) => void; categoryFilter: number | "all"; setCategoryFilter: (value: number | "all") => void; subcategoryFilter: string | "all"; setSubcategoryFilter: (value: string | "all") => void; phaseFilter: CatalogPhase | "all"; setPhaseFilter: (value: CatalogPhase | "all") => void; intensityFilter: Exercise["intensita"] | "all"; setIntensityFilter: (value: Exercise["intensita"] | "all") => void; difficultyFilter: ExerciseDifficulty | "all"; setDifficultyFilter: (value: ExerciseDifficulty | "all") => void; physicalObjectiveFilter: string | "all"; setPhysicalObjectiveFilter: (value: string | "all") => void; onNew: () => void; onImportImages: () => void; onGenerateMissing?: () => void; onOpen: (exercise: Exercise) => void; onEdit: (exercise: Exercise) => void; onDelete: (exercise: Exercise) => void };
+type ArchiveProps = { exercises: Exercise[]; categories: ExerciseCategory[]; subcategories: string[]; physicalObjectives: PhysicalObjective[]; search: string; setSearch: (value: string) => void; categoryFilter: number | "all"; setCategoryFilter: (value: number | "all") => void; subcategoryFilter: string | "all"; setSubcategoryFilter: (value: string | "all") => void; phaseFilter: CatalogPhase | "all"; setPhaseFilter: (value: CatalogPhase | "all") => void; intensityFilter: Exercise["intensita"] | "all"; setIntensityFilter: (value: Exercise["intensita"] | "all") => void; difficultyFilter: ExerciseDifficulty | "all"; setDifficultyFilter: (value: ExerciseDifficulty | "all") => void; physicalObjectiveFilter: string | "all"; setPhysicalObjectiveFilter: (value: string | "all") => void; onNew: () => void; onGenerateMissing?: () => void; onOpen: (exercise: Exercise) => void; onEdit: (exercise: Exercise) => void; onDelete: (exercise: Exercise) => void };
 function Archive(props: ArchiveProps) {
   const hasActiveFilters = props.search !== "" || props.categoryFilter !== "all" || props.subcategoryFilter !== "all" || props.phaseFilter !== "all" || props.intensityFilter !== "all" || props.difficultyFilter !== "all" || props.physicalObjectiveFilter !== "all";
   const resetFilters = () => {
@@ -959,7 +940,7 @@ function Archive(props: ArchiveProps) {
   };
 
   return <>
-    <PageHead eyebrow="Catalogo tecnico ufficiale" title="Archivio esercizi" subtitle={`${props.exercises.length} esercizi nella selezione corrente.`} action={<div className="page-actions">{props.onGenerateMissing && <button className="secondary" onClick={props.onGenerateMissing}>Genera schemi mancanti</button>}<button className="secondary" onClick={props.onImportImages}>⇧ Importa immagini</button><button className="primary" onClick={props.onNew}>+ Nuovo esercizio</button></div>} />
+    <PageHead eyebrow="Catalogo tecnico ufficiale" title="Archivio esercizi" subtitle={`${props.exercises.length} esercizi nella selezione corrente.`} action={<div className="page-actions">{props.onGenerateMissing && <button className="secondary" onClick={props.onGenerateMissing}>Genera schemi mancanti</button>}<button className="primary" onClick={props.onNew}>+ Nuovo esercizio</button></div>} />
     <section className="archive-filter-panel" aria-labelledby="archive-filters-title">
       <div className="archive-filter-head">
         <div className="archive-filter-heading"><span className="archive-filter-icon">⌕</span><div><h2 id="archive-filters-title">Cerca e filtra</h2><p>Restringi il catalogo usando uno o più criteri tecnici.</p></div></div>
@@ -1029,30 +1010,13 @@ function Agenda({ trainings, weekStart, setWeekStart, onOpen, onCreate }: { trai
   })}</div></>;
 }
 
-function ExerciseModal({ exercise, categories, subcategories, onClose, onSave }: { exercise: Exercise | null; categories: ExerciseCategory[]; subcategories: ExerciseSubcategory[]; onClose: () => void; onSave: (draft: ExerciseDraft, schemaImage: File | null, photoImage: File | null) => Promise<void> }) {
-  const firstCategory = categories[0];
-  const firstSubcategory = subcategories.find(item => item.category_id === firstCategory?.id && item.fase !== "Generale");
-  const initial: ExerciseDraft = exercise ? (({ id: _id, category: _category, subcategory: _subcategory, physical_mappings: _physicalMappings, ...rest }) => rest)(exercise) : { ...emptyExercise, category_id: firstCategory?.id ?? 1, subcategory_id: firstSubcategory?.id ?? 1, categoria: firstCategory?.nome ?? emptyExercise.categoria, sottocategoria: firstSubcategory?.nome ?? emptyExercise.sottocategoria, fase: firstSubcategory?.fase === "Generale" ? "Analitico" : firstSubcategory?.fase ?? "Analitico" };
-  const [draft, setDraft] = useState<ExerciseDraft>(initial);
-  const [schemaImage, setSchemaImage] = useState<File | null>(null);
-  const [photoImage, setPhotoImage] = useState<File | null>(null);
-  const [saving, setSaving] = useState(false);
-  const validSubcategories = subcategories.filter(item => item.category_id === draft.category_id && item.fase === draft.fase);
-  const set = <K extends keyof ExerciseDraft>(key: K, value: ExerciseDraft[K]) => setDraft(current => ({ ...current, [key]: value }));
-  function changeCategory(categoryId: number) { const category = categories.find(item => item.id === categoryId); const first = subcategories.find(item => item.category_id === categoryId && item.fase !== "Generale"); if (!category || !first) return; setDraft(current => ({ ...current, category_id: categoryId, subcategory_id: first.id, categoria: category.nome, sottocategoria: first.nome, fase: first.fase as CatalogPhase })); }
-  function changeSubcategory(subcategoryId: number) { const item = subcategories.find(subcategory => subcategory.id === subcategoryId); if (!item || item.fase === "Generale") return; setDraft(current => ({ ...current, subcategory_id: item.id, sottocategoria: item.nome, fase: catalogPhaseFromMethodological(item.fase) })); }
-  async function submit(event: React.FormEvent) { event.preventDefault(); setSaving(true); await onSave(draft, schemaImage, photoImage); setSaving(false); }
-  return <div className="modal-backdrop"><form className="modal exercise-form-modal" onSubmit={submit}><button type="button" className="modal-close" onClick={onClose}>×</button><span className="eyebrow">Catalogo esercizi</span><h2>{exercise ? "Modifica esercizio" : "Nuovo esercizio"}</h2><div className="form-grid modal-form"><div className="field"><label>Codice</label><input required value={draft.codice} onChange={event => set("codice", event.target.value)} /></div><div className="field"><label>Nome</label><input required value={draft.nome} onChange={event => set("nome", event.target.value)} /></div><div className="field"><label>Categoria</label><select required value={draft.category_id} onChange={event => changeCategory(Number(event.target.value))}>{categories.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></div><div className="field"><label>Sottocategoria</label><select required value={draft.subcategory_id} onChange={event => changeSubcategory(Number(event.target.value))}>{validSubcategories.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></div><div className="field"><label>Fase metodologica</label><input value={draft.fase} readOnly /></div><div className="field"><label>Difficoltà</label><select value={draft.difficolta} onChange={event => set("difficolta", Number(event.target.value) as 1 | 2 | 3 | 4)}><option value="1">★ Base</option><option value="2">★★ Intermedio</option><option value="3">★★★ Avanzato</option><option value="4">★★★★ Élite</option></select></div><div className="field full"><label>Obiettivo</label><textarea required rows={2} value={draft.obiettivo} onChange={event => set("obiettivo", event.target.value)} /></div><div className="field full"><label>Descrizione</label><textarea required rows={4} value={draft.descrizione} onChange={event => set("descrizione", event.target.value)} /></div><div className="field"><label>Durata (minuti)</label><input required min="1" type="number" value={draft.durata_min} onChange={event => set("durata_min", Number(event.target.value))} /></div><div className="field"><label>Intensità</label><select value={draft.intensita} onChange={event => set("intensita", event.target.value as ExerciseDraft["intensita"])}><option>Bassa</option><option>Media</option><option>Alta</option></select></div><div className="field"><label>Portieri minimi</label><input required min="1" type="number" value={draft.portieri_min} onChange={event => set("portieri_min", Number(event.target.value))} /></div><div className="field"><label>Portieri massimi</label><input required min={draft.portieri_min} type="number" value={draft.portieri_max} onChange={event => set("portieri_max", Number(event.target.value))} /></div><div className="field full"><label>Materiale</label><input required value={draft.materiale} onChange={event => set("materiale", event.target.value)} /></div><div className="field full"><label>Variante</label><textarea rows={2} value={draft.variante ?? ""} onChange={event => set("variante", event.target.value)} /></div><div className="field full"><label>Coaching points</label><textarea required rows={3} value={draft.coaching_points} onChange={event => set("coaching_points", event.target.value)} /></div><div className="field full"><label>Errori comuni</label><textarea required rows={3} value={draft.errori_comuni} onChange={event => set("errori_comuni", event.target.value)} /></div><div className="field"><label>Schema tecnico</label><input accept="image/jpeg,image/png,image/webp" type="file" onChange={event => setSchemaImage(event.target.files?.[0] ?? null)} /><input className="url-input" placeholder="Oppure URL schema" value={draft.schema_url ?? ""} onChange={event => set("schema_url", event.target.value || null)} /></div><div className="field"><label>Foto dimostrativa</label><input accept="image/jpeg,image/png,image/webp" type="file" onChange={event => setPhotoImage(event.target.files?.[0] ?? null)} /><input className="url-input" placeholder="Oppure URL foto" value={draft.foto_url ?? ""} onChange={event => set("foto_url", event.target.value || null)} /></div><div className="field full checkbox-field"><label><input type="checkbox" checked={draft.attivo} onChange={event => set("attivo", event.target.checked)} /> Esercizio attivo</label></div></div><div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Annulla</button><button className="primary" disabled={saving}>{saving ? "Salvataggio…" : "Salva esercizio"}</button></div></form></div>;
-}
-
-function ExerciseImageModal({ exercise, categories, subcategories, physicalObjectives, onClose, onSave, onImageChange, onSavePhysicalMapping, onRemovePhysicalMapping }: {
+function ExerciseEditorModal({ exercise, categories, subcategories, physicalObjectives, onClose, onSave, onSavePhysicalMapping, onRemovePhysicalMapping }: {
   exercise: Exercise | null;
   categories: ExerciseCategory[];
   subcategories: ExerciseSubcategory[];
   physicalObjectives: PhysicalObjective[];
   onClose: () => void;
-  onSave: (draft: ExerciseDraft, schemaImage: File | null, photoImage: File | null) => Promise<void>;
-  onImageChange: (exercise: Exercise, kind: ExerciseImageKind, file: File | null) => Promise<string | null>;
+  onSave: (draft: ExerciseDraft) => Promise<void>;
   onSavePhysicalMapping: (exercise: Exercise, draft: PhysicalMappingDraft) => Promise<void>;
   onRemovePhysicalMapping: (mapping: ExercisePhysicalObjective) => Promise<void>;
 }) {
@@ -1062,9 +1026,6 @@ function ExerciseImageModal({ exercise, categories, subcategories, physicalObjec
     ? (({ id: _id, category: _category, subcategory: _subcategory, physical_mappings: _physicalMappings, ...rest }) => rest)(exercise)
     : { ...emptyExercise, category_id: firstCategory?.id ?? 1, subcategory_id: firstSubcategory?.id ?? 1, categoria: firstCategory?.nome ?? emptyExercise.categoria, sottocategoria: firstSubcategory?.nome ?? emptyExercise.sottocategoria, fase: firstSubcategory?.fase === "Generale" ? "Analitico" : firstSubcategory?.fase ?? "Analitico" };
   const [draft, setDraft] = useState<ExerciseDraft>(initial);
-  const [schemaImage, setSchemaImage] = useState<File | null>(null);
-  const [photoImage, setPhotoImage] = useState<File | null>(null);
-  const [imageBusy, setImageBusy] = useState<ExerciseImageKind | null>(null);
   const [saving, setSaving] = useState(false);
   const [mappingBusyId, setMappingBusyId] = useState<string | null>(null);
   const [diagramEditor, setDiagramEditor] = useState<{ diagram: TacticalDiagram; origin: "automatic" | "edit" } | null>(null);
@@ -1088,33 +1049,10 @@ function ExerciseImageModal({ exercise, categories, subcategories, physicalObjec
     if (!item || item.fase === "Generale") return;
     setDraft(current => ({ ...current, subcategory_id: item.id, sottocategoria: cleanSubcategoryLabel(item.nome), fase: catalogPhaseFromMethodological(item.fase) }));
   }
-  async function uploadImage(kind: ExerciseImageKind, file: File) {
-    if (!exercise) {
-      if (kind === "schema") setSchemaImage(file); else setPhotoImage(file);
-      return;
-    }
-    setImageBusy(kind);
-    try {
-      const url = await onImageChange(exercise, kind, file);
-      set(kind === "schema" ? "schema_url" : "foto_url", url);
-    } finally { setImageBusy(null); }
-  }
-  async function removeImage(kind: ExerciseImageKind) {
-    if (!exercise) {
-      if (kind === "schema") setSchemaImage(null); else setPhotoImage(null);
-      set(kind === "schema" ? "schema_url" : "foto_url", null);
-      return;
-    }
-    setImageBusy(kind);
-    try {
-      await onImageChange(exercise, kind, null);
-      set(kind === "schema" ? "schema_url" : "foto_url", null);
-    } finally { setImageBusy(null); }
-  }
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setSaving(true);
-    await onSave(draft, schemaImage, photoImage);
+    await onSave(draft);
     setSaving(false);
   }
   async function savePhysicalMapping(mappingDraft: PhysicalMappingDraft) {
@@ -1177,13 +1115,9 @@ function ExerciseImageModal({ exercise, categories, subcategories, physicalObjec
         {draft.tactical_diagram && <div className="diagram-status"><span>Schema presente</span><small>Origine: {draft.diagram_source === "automatic" ? "automatico" : draft.diagram_source === "automatic_edited" ? "automatico modificato" : "manuale"}</small></div>}
       </section>
       {diagramEditor && <div className="field full"><TacticalDiagramEditor exercise={exerciseForDiagram()} value={diagramEditor.diagram} onCancel={() => setDiagramEditor(null)} onSave={diagram => { const automatic = diagramEditor.origin === "automatic"; setDraft(current => ({ ...current, tactical_diagram: diagram, diagram_source: automatic ? "automatic" : current.diagram_source === "automatic" ? "automatic_edited" : "manual", diagram_updated_at: new Date().toISOString() })); setDiagramEditor(null); }} /></div>}
-      <section className="exercise-images-section field full"><div className="exercise-images-title"><span>Immagini esercizio</span><small>WEBP, JPG, JPEG o PNG · salvataggio nello Storage Supabase</small></div><div className="exercise-images-grid">
-        <ExerciseImageField label="Schema tecnico" kind="schema" url={draft.schema_url} selectedFile={schemaImage} busy={imageBusy === "schema"} immediate={Boolean(exercise)} onSelect={setSchemaImage} onUpload={file => uploadImage("schema", file)} onDelete={() => removeImage("schema")} />
-        <ExerciseImageField label="Foto dimostrativa" kind="foto" url={draft.foto_url} selectedFile={photoImage} busy={imageBusy === "foto"} immediate={Boolean(exercise)} onSelect={setPhotoImage} onUpload={file => uploadImage("foto", file)} onDelete={() => removeImage("foto")} />
-      </div></section>
       <div className="field full checkbox-field"><label><input type="checkbox" checked={draft.attivo} onChange={event => set("attivo", event.target.checked)} /> Esercizio attivo</label></div>
     </div>
-    <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Annulla</button><button className="primary" disabled={saving || imageBusy !== null}>{saving ? "Salvataggio…" : "Salva esercizio"}</button></div>
+    <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Annulla</button><button className="primary" disabled={saving}>{saving ? "Salvataggio…" : "Salva esercizio"}</button></div>
   </form></div>;
 }
 
@@ -1196,9 +1130,10 @@ function ExerciseDetailModal({ exercise, onClose, onEdit, plannedDuration, varia
     <div className="modal-actions"><button className="secondary" onClick={onClose}>Chiudi</button><button onClick={onEdit}>Modifica esercizio</button></div></div></div>;
 }
 
-function PlannerTrainingModal({ training, catalog, goalkeepers, categories, physicalDimensions, seasonPhases, onOpenExercise, onClose, onEdit, onDelete }: { training: Training; catalog:Exercise[];goalkeepers:Goalkeeper[];categories:ExerciseCategory[];physicalDimensions:PhysicalAssessmentDimension[];seasonPhases:SeasonPhaseConfig[];onOpenExercise:(exercise:Exercise,plannedDuration:number,variants:TrainingExerciseVariant[])=>void;onClose: () => void; onEdit: () => void; onDelete: () => void }) {
+function PlannerTrainingModal({ training, catalog, goalkeepers, categories, physicalDimensions, seasonPhases, onOpenExercise, onClose, onEdit, onDelete, onSessionChanged }: { training: Training; catalog:Exercise[];goalkeepers:Goalkeeper[];categories:ExerciseCategory[];physicalDimensions:PhysicalAssessmentDimension[];seasonPhases:SeasonPhaseConfig[];onOpenExercise:(exercise:Exercise,plannedDuration:number,variants:TrainingExerciseVariant[])=>void;onClose: () => void; onEdit: () => void; onDelete: () => void; onSessionChanged: () => Promise<void> }) {
   const [expanded,setExpanded]=useState<Record<number,boolean>>({});
   const [fieldMode,setFieldMode]=useState(false);
+  const [evaluationMode,setEvaluationMode]=useState<"field"|"results"|null>(null);
   const blocks=useMemo(()=>[...(training.training_blocks??[])].sort((a,b)=>a.ordine-b.ordine),[training.training_blocks]);
   useEffect(()=>{const frame=window.requestAnimationFrame(()=>{const compact=window.matchMedia("(max-width: 640px)").matches;setExpanded(Object.fromEntries(blocks.map((block,index)=>[block.ordine,!compact||index===0])));});return()=>window.cancelAnimationFrame(frame);},[training.id,blocks]);
   const catalogById=new Map(catalog.map(exercise=>[exercise.id,exercise]));
@@ -1216,6 +1151,14 @@ function PlannerTrainingModal({ training, catalog, goalkeepers, categories, phys
   const selectedGoalkeepers=goalkeepers.filter(goalkeeper=>training.training_goalkeepers?.some(item=>item.goalkeeper_id===goalkeeper.id));
   const goalkeeperName=(id:string)=>{const goalkeeper=goalkeepers.find(item=>item.id===id);return goalkeeper?`${goalkeeper.nome} ${goalkeeper.cognome}`:"Portiere";};
   const quality=training.current_quality_snapshot&&"score" in training.current_quality_snapshot?Number(training.current_quality_snapshot.score):null;
+  if (training.evaluation_session) {
+    const evaluatedGoalkeeper = goalkeepers.find(item => item.id === training.evaluation_session?.goalkeeper_id);
+    const evaluationAction = training.evaluation_session.status === "Completed" ? "Vedi risultati" : training.evaluation_session.status === "InProgress" ? "Continua valutazione" : "Avvia valutazione";
+    return <><div className="modal-backdrop" onClick={onClose}><div className="modal training-detail-modal rich-training-modal evaluation-training-modal" onClick={event => event.stopPropagation()}><button className="training-modal-close" onClick={onClose} aria-label="Chiudi finestra" title="Chiudi">×</button>
+      <div className="evaluation-training-heading"><div><span className="evaluation-badge">VALUTAZIONE</span><span className="evaluation-type-badge">{training.evaluation_session.evaluation_type === "Complete" ? "Completa" : "Mirata"}</span><h2>{new Date(`${training.training_date}T12:00:00`).toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</h2><p>{training.planned_duration_minutes} minuti · {displayItems.length} esercizi · Stato {training.evaluation_session.status}</p></div><div className="evaluation-goalkeeper-panel"><small>Portiere valutato</small><strong>{evaluatedGoalkeeper ? `${evaluatedGoalkeeper.nome} ${evaluatedGoalkeeper.cognome}` : "Portiere"}</strong><span>Minimo {training.evaluation_session.minimum_observations} osservazioni</span></div></div>
+      <div className="evaluation-saved-exercises">{displayItems.map((item,index)=><SessionExerciseCard key={item.id} item={item} number={index+1} goalkeeperName={goalkeeperName} onOpen={()=>onOpenExercise(item.exercise,item.plannedDuration,item.variants)}/>)}</div>
+      <div className="training-modal-footer"><button className="primary evaluation-launch-button" onClick={()=>setEvaluationMode(training.evaluation_session?.status === "Completed" ? "results" : "field")}>{evaluationAction}</button><button className="training-icon-action delete" onClick={onDelete} aria-label="Elimina seduta" title="Elimina seduta">🗑</button></div></div></div>{evaluationMode&&<EvaluationFieldMode sessionId={training.evaluation_session.id} initialMode={evaluationMode} onSessionChanged={onSessionChanged} onClose={()=>{setEvaluationMode(null);onClose();}}/>}</>;
+  }
   return <><div className="modal-backdrop" onClick={onClose}><div className="modal training-detail-modal rich-training-modal" onClick={event => event.stopPropagation()}><button className="training-modal-close" onClick={onClose} aria-label="Chiudi finestra" title="Chiudi">×</button>
     <SessionOverviewHeader date={training.training_date} matchDay={training.session_profile_code||(training.match_day_offset!==null&&training.match_day_offset!==undefined?`MD${training.match_day_offset}`:"MD")} seasonPhase={phase?.tipo??"Non specificata"} duration={training.planned_duration_minutes} load={training.planned_load||((training.session_profile_snapshot as SessionProfile|undefined)?.load)||"Non specificato"} goalkeeperCount={training.goalkeeper_count} technicalPrimary={technicalPrimary} technicalSecondary={technicalSecondary} physicalPrimary={physicalPrimary} goalkeeperNames={selectedGoalkeepers.map(item=>`${item.nome} ${item.cognome}`)} quality={quality} onFieldMode={()=>setFieldMode(true)}/>
     <div className="saved-session-blocks">{blocks.map((block,index)=>{const items=groupSessionExercises(displayItems,block.ordine);const isOpen=expanded[block.ordine]??true;const blockTechnical=categories.find(item=>item.id===block.technical_category_id)?.nome;const blockPhysical=physicalDimensions.find(item=>item.id===block.physical_dimension_id)?.nome;return <article className={`generated-block rich-block ${isOpen?"open":"collapsed"}`} key={block.ordine}><header><button className="block-collapse" onClick={()=>setExpanded(current=>({...current,[block.ordine]:!isOpen}))} aria-expanded={isOpen} aria-label={`${isOpen?"Comprimi":"Espandi"} blocco ${String.fromCharCode(65+index)}`}><b>{String.fromCharCode(65+index)}</b><span>{isOpen?"⌃":"⌄"}</span></button><div className="rich-block-heading"><strong>{block.tipo_blocco}</strong><small>{block.durata_target} min · {items.length} {items.length===1?"esercizio":"esercizi"}</small></div><div className="rich-block-targets"><span>{block.fase_metodologica_preferita||"Fase libera"}</span><span>Carico {block.carico_target||"libero"}</span>{blockTechnical&&<span>Focus {blockTechnical}</span>}{blockPhysical&&<span>Fisico {blockPhysical}</span>}</div></header>{isOpen&&<div className="rich-block-body">{items.length?items.map(item=><SessionExerciseCard key={item.id} item={item} number={displayItems.findIndex(candidate=>candidate.id===item.id)+1} goalkeeperName={goalkeeperName} onOpen={()=>onOpenExercise(item.exercise,item.plannedDuration,item.variants)}/>):<p className="planner-empty">Nessun esercizio salvato in questo blocco.</p>}</div>}</article>})}</div>

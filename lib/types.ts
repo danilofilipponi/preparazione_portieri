@@ -113,8 +113,6 @@ export type Exercise = {
   schema_step_6: string | null;
   scenario_gara: string | null;
   numero_azioni: string | null;
-  schema_url: string | null;
-  foto_url: string | null;
   tactical_diagram?: TacticalDiagram | null;
   diagram_source?: DiagramSource | null;
   diagram_updated_at?: string | null;
@@ -184,6 +182,18 @@ export type Training = {
   training_blocks?: SessionBlock[];
   training_objectives: { objective: string }[];
   training_exercises: TrainingExercise[];
+  evaluation_session?: EvaluationSessionSummary | null;
+};
+
+export type EvaluationSessionSummary = {
+  id: string;
+  evaluation_type: "Complete" | "Targeted" | "Reassessment";
+  status: "Draft" | "Ready" | "InProgress" | "Completed" | "Cancelled";
+  goalkeeper_id: string;
+  minimum_observations: number;
+  context_preference?: string;
+  started_at?: string | null;
+  completed_at?: string | null;
 };
 
 export type CalendarDayType = "Allenamento" | "Gara" | "Amichevole" | "Riposo" | "Recupero" | "Allenamento extra" | "Annullato" | "Altro";

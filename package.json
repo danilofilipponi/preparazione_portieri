@@ -9,12 +9,11 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs && node --experimental-strip-types --test tests/session-planner.test.ts tests/exercise-selection.test.ts tests/session-editor.test.ts tests/session-visualization.test.ts tests/tactical-diagram.test.ts tests/tactical-setup-validation.test.ts tests/tactical-catalog-audit.test.ts",
+    "test": "npm run build && node --test tests/rendered-html.test.mjs && node --experimental-strip-types --test tests/session-planner.test.ts tests/exercise-selection.test.ts tests/session-editor.test.ts tests/session-visualization.test.ts tests/tactical-diagram.test.ts tests/tactical-setup-validation.test.ts tests/tactical-catalog-audit.test.ts tests/evaluation-mapping-audit.test.ts tests/evaluation-session-engine.test.ts tests/evaluation-mapping-review.test.ts tests/complete-evaluation-design.test.ts tests/evaluation-production.test.ts tests/evaluation-field.test.ts tests/evaluation-history.test.ts tests/evaluation-reassessment.test.ts",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.112.2",
     "@supabase/supabase-js": "2.112.2",
     "drizzle-orm": "0.45.2",
     "react": "19.2.6",

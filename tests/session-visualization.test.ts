@@ -2,15 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import type { Exercise } from "../lib/types.ts";
-import { getFieldModeIndex, getSessionExerciseImage, groupSessionExercises, variantsForGoalkeeper, type SessionDisplayExercise } from "../lib/session-visualization.ts";
+import { getFieldModeIndex, groupSessionExercises, variantsForGoalkeeper, type SessionDisplayExercise } from "../lib/session-visualization.ts";
 
-function exercise(id:string,patch:Partial<Exercise>={}):Exercise{return{id,codice:id,nome:`Esercizio ${id}`,category_id:1,subcategory_id:1,categoria:"Tecnica",sottocategoria:"Presa alta",fase:"Analitico",obiettivo:"Obiettivo",descrizione:"Descrizione",durata_min:10,portieri_min:1,portieri_max:4,intensita:"Media",difficolta:2,materiale:"Palloni",variante:null,coaching_points:"Appoggio corto; testa sulla palla",errori_comuni:"",schema_step_1:null,schema_step_2:null,schema_step_3:null,schema_step_4:null,schema_step_5:null,schema_step_6:null,scenario_gara:null,numero_azioni:null,schema_url:null,foto_url:null,attivo:true,...patch};}
+function exercise(id:string,patch:Partial<Exercise>={}):Exercise{return{id,codice:id,nome:`Esercizio ${id}`,category_id:1,subcategory_id:1,categoria:"Tecnica",sottocategoria:"Presa alta",fase:"Analitico",obiettivo:"Obiettivo",descrizione:"Descrizione",durata_min:10,portieri_min:1,portieri_max:4,intensita:"Media",difficolta:2,materiale:"Palloni",variante:null,coaching_points:"Appoggio corto; testa sulla palla",errori_comuni:"",schema_step_1:null,schema_step_2:null,schema_step_3:null,schema_step_4:null,schema_step_5:null,schema_step_6:null,scenario_gara:null,numero_azioni:null,attivo:true,...patch};}
 function item(id:string,blockOrder:number,blockPosition=0,patch:Partial<SessionDisplayExercise>={}):SessionDisplayExercise{return{id,exercise:exercise(id),plannedDuration:10,blockOrder,blockPosition,locked:false,reasons:[],variants:[],...patch};}
 
 test("caso A: quattro esercizi compaiono nei rispettivi quattro blocchi",()=>{const items=[1,2,3,4].map(order=>item(`E${order}`,order));for(let order=1;order<=4;order++)assert.equal(groupSessionExercises(items,order)[0].id,`E${order}`);});
 test("caso B: due esercizi nello stesso blocco rispettano la posizione",()=>{const items=[item("E2",2,1),item("E1",2,0)];assert.deepEqual(groupSessionExercises(items,2).map(value=>value.id),["E1","E2"]);});
-test("caso C: schema_url ha priorità nella miniatura",()=>{assert.equal(getSessionExerciseImage(exercise("E",{schema_url:"schema.webp",foto_url:"foto.webp"})),"schema.webp");});
-test("caso D: senza schema o foto viene richiesto il placeholder",()=>{assert.equal(getSessionExerciseImage(exercise("E")),null);});
 test("caso E: la card espone l’azione Apri esercizio",()=>{const source=readFileSync(new URL("../app/components/session-exercise-card.tsx",import.meta.url),"utf8");assert.match(source,/Apri esercizio/);assert.match(source,/props\.onOpen/);});
 test("caso F: Match Simulation mantiene scenario e numero azioni",()=>{const value=exercise("MS",{categoria:"Match Simulation",scenario_gara:"Cross e seconda palla",numero_azioni:"6"});assert.equal(value.scenario_gara,"Cross e seconda palla");assert.equal(value.numero_azioni,"6");});
 test("caso G: più obiettivi fisici restano disponibili nella scheda reale",()=>{const mappings=[{id:"1"},{id:"2"},{id:"3"}] as Exercise["physical_mappings"];assert.equal(exercise("E",{physical_mappings:mappings}).physical_mappings?.length,3);});

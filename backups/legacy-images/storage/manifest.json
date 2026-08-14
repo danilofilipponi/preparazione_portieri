@@ -1,0 +1,434 @@
+{
+  "created_at": "2026-08-12T13:02:42.173Z",
+  "bucket": "exercise-images",
+  "total": 53,
+  "schema": 36,
+  "foto": 17,
+  "files": [
+    {
+      "path": "exercise-images/GK-PRA-001/schema.webp",
+      "size": 30526,
+      "sha256": "042fe2baad22dee944e7a46caf37c3c9eff392930be62559af9e44550ab7c537",
+      "type": "schema",
+      "exercise_code": "GK-PRA-001",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-001/schema.webp?v=1786140925441"
+    },
+    {
+      "path": "exercise-images/GK-PRA-001/foto.webp",
+      "size": 125204,
+      "sha256": "49794733d671d11469255afd42be38c62ff957af9cd4cccbf16405ddabbcbebd",
+      "type": "foto",
+      "exercise_code": "GK-PRA-001",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-001/foto.webp?v=1786140925131"
+    },
+    {
+      "path": "exercise-images/GK-PRA-002/schema.webp",
+      "size": 38022,
+      "sha256": "254da1287218aa5614bef16884c469618d469b7ed5ad18e23f8e02a5676bc44e",
+      "type": "schema",
+      "exercise_code": "GK-PRA-002",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-002/schema.webp?v=1786140926226"
+    },
+    {
+      "path": "exercise-images/GK-PRA-002/foto.webp",
+      "size": 178088,
+      "sha256": "196dbbe1c2c32be3dd5d31cbd6654808385d0d56e626f4007d9058b01ee16d14",
+      "type": "foto",
+      "exercise_code": "GK-PRA-002",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-002/foto.webp?v=1786140925863"
+    },
+    {
+      "path": "exercise-images/GK-PRA-003/schema.webp",
+      "size": 39922,
+      "sha256": "58972a1c5697d33b0aa42efab28d58a4ab46efb2f6bc85e7fdf112d533136efa",
+      "type": "schema",
+      "exercise_code": "GK-PRA-003",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-003/schema.webp?v=1786140926538"
+    },
+    {
+      "path": "exercise-images/GK-PRA-003/foto.webp",
+      "size": 140028,
+      "sha256": "16a314c738f75e0e0180344913e100528665751dcffca954f213a8989981defa",
+      "type": "foto",
+      "exercise_code": "GK-PRA-003",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-003/foto.webp?v=1786140918867"
+    },
+    {
+      "path": "exercise-images/GK-PRA-004/schema.webp",
+      "size": 47252,
+      "sha256": "79ef58cde0a797db4abe93fb3960b2c709a6a4375e7279772297c2852a936fcf",
+      "type": "schema",
+      "exercise_code": "GK-PRA-004",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-004/schema.webp?v=1786140919860"
+    },
+    {
+      "path": "exercise-images/GK-PRA-004/foto.webp",
+      "size": 118710,
+      "sha256": "9bb01879a84633e5ea0e46eb9c4e0c25f0b70c42711253eb18fab23316075e36",
+      "type": "foto",
+      "exercise_code": "GK-PRA-004",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-004/foto.webp?v=1786140919499"
+    },
+    {
+      "path": "exercise-images/GK-PRA-005/schema.webp",
+      "size": 40730,
+      "sha256": "5e909ab808f94b8ad9978ed5c32272f0d99f2b7b90180af930e87f7cc471316c",
+      "type": "schema",
+      "exercise_code": "GK-PRA-005",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-005/schema.webp?v=1786140920687"
+    },
+    {
+      "path": "exercise-images/GK-PRA-005/foto.webp",
+      "size": 156936,
+      "sha256": "3ae641825e95aabfdb86dfe07ea0c0870c8e2d144bc774bf8cfaf8a1e647653c",
+      "type": "foto",
+      "exercise_code": "GK-PRA-005",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-005/foto.webp?v=1786140920307"
+    },
+    {
+      "path": "exercise-images/GK-PRA-006/schema.webp",
+      "size": 42374,
+      "sha256": "2ddbdb3b73cdfef1262c92c9ae150c68168a244da70bcb414304ae98568858a5",
+      "type": "schema",
+      "exercise_code": "GK-PRA-006",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-006/schema.webp?v=1786140921447"
+    },
+    {
+      "path": "exercise-images/GK-PRA-006/foto.webp",
+      "size": 145248,
+      "sha256": "9f16102bf5ad8e4d2ad8245f8ad1da8373d9b2a879c21b5b4dae4fc81f4bd2d3",
+      "type": "foto",
+      "exercise_code": "GK-PRA-006",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-006/foto.webp?v=1786140921086"
+    },
+    {
+      "path": "exercise-images/GK-PRA-007/schema.webp",
+      "size": 45172,
+      "sha256": "33ff398757b3697b87abf64a17b94469c762bcda43e91f8a2fdd74ddb44058cc",
+      "type": "schema",
+      "exercise_code": "GK-PRA-007",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-007/schema.webp?v=1786140922187"
+    },
+    {
+      "path": "exercise-images/GK-PRA-007/foto.webp",
+      "size": 127320,
+      "sha256": "e0e7134c19fdab0217ed6e88abdb0035159c80447ff20ab81e7d4a39c427de71",
+      "type": "foto",
+      "exercise_code": "GK-PRA-007",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-007/foto.webp?v=1786140921831"
+    },
+    {
+      "path": "exercise-images/GK-PRA-008/schema.webp",
+      "size": 38904,
+      "sha256": "e4b8a859314c7014ee1ea760144d5385465518554189dae4b067240f4e508edb",
+      "type": "schema",
+      "exercise_code": "GK-PRA-008",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-008/schema.webp?v=1786140923047"
+    },
+    {
+      "path": "exercise-images/GK-PRA-008/foto.webp",
+      "size": 139146,
+      "sha256": "16ee61e4b117e0005721eefcab699ae9bec67addb4741d1649dd28bde4413eea",
+      "type": "foto",
+      "exercise_code": "GK-PRA-008",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-008/foto.webp?v=1786140922687"
+    },
+    {
+      "path": "exercise-images/GK-PRA-009/schema.webp",
+      "size": 46072,
+      "sha256": "a80c1df32016fc0ce716ac23e9308cb0046669269d70896bf4b3e13aae411892",
+      "type": "schema",
+      "exercise_code": "GK-PRA-009",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-009/schema.webp?v=1786140923767"
+    },
+    {
+      "path": "exercise-images/GK-PRA-009/foto.webp",
+      "size": 125040,
+      "sha256": "ad02dac380e162b517292d09f13071caf72f6725bd3833f81b2a4aa2756f58bc",
+      "type": "foto",
+      "exercise_code": "GK-PRA-009",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-009/foto.webp?v=1786140923431"
+    },
+    {
+      "path": "exercise-images/GK-PRA-010/schema.webp",
+      "size": 41312,
+      "sha256": "84329f41c4757ac1f50257e2fe527fefb076944f9dffa162283981d3e3fd279a",
+      "type": "schema",
+      "exercise_code": "GK-PRA-010",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-010/schema.webp?v=1786140924735"
+    },
+    {
+      "path": "exercise-images/GK-PRA-010/foto.webp",
+      "size": 137262,
+      "sha256": "5274317ef91eabc101a6699670530f2b5fc3ed82b23df311bbb5e212b5540a19",
+      "type": "foto",
+      "exercise_code": "GK-PRA-010",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-010/foto.webp?v=1786140924359"
+    },
+    {
+      "path": "exercise-images/GK-PRA-011/schema.webp",
+      "size": 112646,
+      "sha256": "3d1724cc16dfc184022942474f3c9d838ec11a6194ab629a8a77da001fe45bb9",
+      "type": "schema",
+      "exercise_code": "GK-PRA-011",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-011/schema.webp?v=1786144403462"
+    },
+    {
+      "path": "exercise-images/GK-PRA-011/foto.webp",
+      "size": 145634,
+      "sha256": "d5511b06333cb9403ad3e828dd809f7d3aa00b2f13560e30a107af6630d1f2a2",
+      "type": "foto",
+      "exercise_code": "GK-PRA-011",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-011/foto.webp?v=1786140989815"
+    },
+    {
+      "path": "exercise-images/GK-PRA-012/schema.webp",
+      "size": 46302,
+      "sha256": "cf24f027baa811bca1675f7b36af3530a302a894676fb1a416c5761a5fae3965",
+      "type": "schema",
+      "exercise_code": "GK-PRA-012",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-012/schema.webp?v=1786140991011"
+    },
+    {
+      "path": "exercise-images/GK-PRA-012/foto.webp",
+      "size": 152546,
+      "sha256": "575493cf321e94b7b1a71391d91351573098000cca03a46e28f91651aea50221",
+      "type": "foto",
+      "exercise_code": "GK-PRA-012",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-012/foto.webp?v=1786140990651"
+    },
+    {
+      "path": "exercise-images/GK-PRA-013/schema.webp",
+      "size": 42746,
+      "sha256": "dc7d74c5131eb5e4ba2690b4f3340df97f73752dd5a15c6bf86195e9c48a53a5",
+      "type": "schema",
+      "exercise_code": "GK-PRA-013",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-013/schema.webp?v=1786140991891"
+    },
+    {
+      "path": "exercise-images/GK-PRA-013/foto.webp",
+      "size": 171584,
+      "sha256": "ec264ae0e593fe80e20c6d810717c177ec971760b42756f6998134ef473b9c23",
+      "type": "foto",
+      "exercise_code": "GK-PRA-013",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-013/foto.webp?v=1786140991443"
+    },
+    {
+      "path": "exercise-images/GK-PRA-014/schema.webp",
+      "size": 45290,
+      "sha256": "fa3a6efe63c909c2dbfd852a3bdaed0489a041e8558dfb6a9086c2e8c73ad387",
+      "type": "schema",
+      "exercise_code": "GK-PRA-014",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-014/schema.webp?v=1786140992235"
+    },
+    {
+      "path": "exercise-images/GK-PRA-014/foto.webp",
+      "size": 161692,
+      "sha256": "17f8f1e789586c505d10b7230f677fd688a3a93f89f876a90059dff820175da0",
+      "type": "foto",
+      "exercise_code": "GK-PRA-014",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-014/foto.webp?v=1786140986876"
+    },
+    {
+      "path": "exercise-images/GK-PRA-015/schema.webp",
+      "size": 45336,
+      "sha256": "b69606ce6ae2b5479e8d33646aecd509ef833e1a396a430fb2df8aef3480baf3",
+      "type": "schema",
+      "exercise_code": "GK-PRA-015",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-015/schema.webp?v=1786140987679"
+    },
+    {
+      "path": "exercise-images/GK-PRA-015/foto.webp",
+      "size": 152522,
+      "sha256": "bc66f3c6e2ca760dfdcec262b833812697f9c605a8ca94699574ea989c3abac2",
+      "type": "foto",
+      "exercise_code": "GK-PRA-015",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-015/foto.webp?v=1786140987303"
+    },
+    {
+      "path": "exercise-images/GK-PRA-016/schema.webp",
+      "size": 41952,
+      "sha256": "b239e1787876c3c0ebda595e9f7ab6efe82490ee1358ed905250476a52145720",
+      "type": "schema",
+      "exercise_code": "GK-PRA-016",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-016/schema.webp?v=1786140988475"
+    },
+    {
+      "path": "exercise-images/GK-PRA-016/foto.webp",
+      "size": 142716,
+      "sha256": "71ffea3965acde94993f7e614b6d543f3142e3ecd17fb784270212e7a6122b12",
+      "type": "foto",
+      "exercise_code": "GK-PRA-016",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-016/foto.webp?v=1786140988099"
+    },
+    {
+      "path": "exercise-images/GK-PRA-017/schema.webp",
+      "size": 100928,
+      "sha256": "aae31b149b4e60de3d35f538c15b40b35537e2f4882701b8176a77b4c5be2cc9",
+      "type": "schema",
+      "exercise_code": "GK-PRA-017",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-017/schema.webp?v=1786144403875"
+    },
+    {
+      "path": "exercise-images/GK-PRA-017/foto.webp",
+      "size": 143636,
+      "sha256": "7e8a5d7e2d1a53a15a510efbf3462589a55d492d0174e5e906743a177a18466b",
+      "type": "foto",
+      "exercise_code": "GK-PRA-017",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-017/foto.webp?v=1786140989051"
+    },
+    {
+      "path": "exercise-images/GK-PRA-018/schema.webp",
+      "size": 82962,
+      "sha256": "a57ba9805df04467624e019b25511530a5fa97b83791b90283bca6fd8974988a",
+      "type": "schema",
+      "exercise_code": "GK-PRA-018",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-018/schema.webp?v=1786144404505"
+    },
+    {
+      "path": "exercise-images/GK-PRA-019/schema.webp",
+      "size": 128868,
+      "sha256": "8d188de1bc31a800f720be389d36d7a4a1043949158efbfdb969c03815e6551d",
+      "type": "schema",
+      "exercise_code": "GK-PRA-019",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-019/schema.webp?v=1786144404876"
+    },
+    {
+      "path": "exercise-images/GK-PRA-020/schema.webp",
+      "size": 97138,
+      "sha256": "f62675a11508ffde0d71aa2de2f54ce7891cc63838fd710c961029c2e5255f51",
+      "type": "schema",
+      "exercise_code": "GK-PRA-020",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-020/schema.webp?v=1786144405259"
+    },
+    {
+      "path": "exercise-images/GK-PRA-021/schema.webp",
+      "size": 123614,
+      "sha256": "6cac55ea34f3d5a8a28769c45a9f2d11b3b7d9d8cda921f1d963527ada84e252",
+      "type": "schema",
+      "exercise_code": "GK-PRA-021",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-021/schema.webp?v=1786144405929"
+    },
+    {
+      "path": "exercise-images/GK-PRA-022/schema.webp",
+      "size": 86860,
+      "sha256": "13479476170a37c35e1a76cfdc618342c2ce8532d5f170c57ba6c85508269cad",
+      "type": "schema",
+      "exercise_code": "GK-PRA-022",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-022/schema.webp?v=1786144406294"
+    },
+    {
+      "path": "exercise-images/GK-PRA-023/schema.webp",
+      "size": 104228,
+      "sha256": "8b2db4f103c5e00af322b1038af42a14b8a46fe29bcf5098a441dc12bf65dc6c",
+      "type": "schema",
+      "exercise_code": "GK-PRA-023",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-023/schema.webp?v=1786144406704"
+    },
+    {
+      "path": "exercise-images/GK-PRA-024/schema.webp",
+      "size": 103338,
+      "sha256": "a8db94d6c5472d41b5e33afa5509a10a2edc201c38b75ef8a261c9adbe8b325f",
+      "type": "schema",
+      "exercise_code": "GK-PRA-024",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-024/schema.webp?v=1786144397797"
+    },
+    {
+      "path": "exercise-images/GK-PRA-025/schema.webp",
+      "size": 111562,
+      "sha256": "79ba39c985045b285cc0fbcd277625af287d09c3fe61f0de1149b46afa594d67",
+      "type": "schema",
+      "exercise_code": "GK-PRA-025",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-025/schema.webp?v=1786144398286"
+    },
+    {
+      "path": "exercise-images/GK-PRA-026/schema.webp",
+      "size": 101044,
+      "sha256": "168e9994252487928d73722140057dfbb3c35f7eff41f968c200ab9b11da5efd",
+      "type": "schema",
+      "exercise_code": "GK-PRA-026",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-026/schema.webp?v=1786144398901"
+    },
+    {
+      "path": "exercise-images/GK-PRA-027/schema.webp",
+      "size": 95748,
+      "sha256": "a88fc060d2bf432f18e8f747acd87eb991a60dae82d78a6a3244be15f40c702e",
+      "type": "schema",
+      "exercise_code": "GK-PRA-027",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-027/schema.webp?v=1786144399299"
+    },
+    {
+      "path": "exercise-images/GK-PRA-028/schema.webp",
+      "size": 97536,
+      "sha256": "b0d4663548055282277a465d761ccbf5d751a7f8b857481f23a6dd4ebcb14c5c",
+      "type": "schema",
+      "exercise_code": "GK-PRA-028",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-028/schema.webp?v=1786144399684"
+    },
+    {
+      "path": "exercise-images/GK-PRA-029/schema.webp",
+      "size": 123682,
+      "sha256": "fa142e5e2213ddc16b93d2849c3acb52090f34fe8d0c847508ab1d7cd1ba1c46",
+      "type": "schema",
+      "exercise_code": "GK-PRA-029",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-029/schema.webp?v=1786144400083"
+    },
+    {
+      "path": "exercise-images/GK-PRA-030/schema.webp",
+      "size": 106590,
+      "sha256": "e49bba212f891aea6df5dc9e85c65509d71151b9b99f997d3fbc02bed3df2fc2",
+      "type": "schema",
+      "exercise_code": "GK-PRA-030",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-030/schema.webp?v=1786144400442"
+    },
+    {
+      "path": "exercise-images/GK-PRA-031/schema.webp",
+      "size": 110472,
+      "sha256": "f09788694c715c1dcc35049725f057d960b81e58dbc1ee20f23cbcf1717217f3",
+      "type": "schema",
+      "exercise_code": "GK-PRA-031",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-031/schema.webp?v=1786144400868"
+    },
+    {
+      "path": "exercise-images/GK-PRA-032/schema.webp",
+      "size": 123614,
+      "sha256": "6cac55ea34f3d5a8a28769c45a9f2d11b3b7d9d8cda921f1d963527ada84e252",
+      "type": "schema",
+      "exercise_code": "GK-PRA-032",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-032/schema.webp?v=1786144401343"
+    },
+    {
+      "path": "exercise-images/GK-PRA-033/schema.webp",
+      "size": 125082,
+      "sha256": "ce2ec0b598d6c1d53476b5dcf99d0af29aa3a5ecb43163f36f88cffc4b77cfe8",
+      "type": "schema",
+      "exercise_code": "GK-PRA-033",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-033/schema.webp?v=1786144401792"
+    },
+    {
+      "path": "exercise-images/GK-PRA-034/schema.webp",
+      "size": 123682,
+      "sha256": "fa142e5e2213ddc16b93d2849c3acb52090f34fe8d0c847508ab1d7cd1ba1c46",
+      "type": "schema",
+      "exercise_code": "GK-PRA-034",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-034/schema.webp?v=1786144402210"
+    },
+    {
+      "path": "exercise-images/GK-PRA-035/schema.webp",
+      "size": 123088,
+      "sha256": "f5e386935e792e390a1b3e9f9899e4e8910d761ec98b2b7e233eec4a078ac200",
+      "type": "schema",
+      "exercise_code": "GK-PRA-035",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-035/schema.webp?v=1786144402642"
+    },
+    {
+      "path": "exercise-images/GK-PRA-036/schema.webp",
+      "size": 121968,
+      "sha256": "d34bb9a36e14168734be025ed41df0c90a06d2c19dce34129f5fd91a800a3480",
+      "type": "schema",
+      "exercise_code": "GK-PRA-036",
+      "source_url": "https://fdsucpzrpsnjcwsolzav.supabase.co/storage/v1/object/public/exercise-images/GK-PRA-036/schema.webp?v=1786144403079"
+    }
+  ],
+  "manifest_sha256": "0b57d515a3d929c112ddc434568da0e0751d0c8ec6805ce9aca31618c0e106d3"
+}

@@ -28,9 +28,9 @@ facile verificare il flusso completo senza introdurre astrazioni premature.
 
 ### `exercises`
 
-È l'archivio principale. Contiene tutti i campi richiesti, compresi durata,
-intervallo di portieri compatibile e `image_path`. Quest'ultimo conserva solo
-il percorso del file nel bucket Storage `exercise-images`, non l'immagine.
+È l'archivio principale. Contiene i dati tecnici, la durata e l'intervallo di
+portieri compatibile. La rappresentazione visuale ufficiale degli esercizi è il
+JSON `tactical_diagram` renderizzato dalla Tactical Board V2.
 
 ### `trainings`
 
