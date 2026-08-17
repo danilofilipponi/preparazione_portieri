@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { buildProductionTargetCatalog, createProductionBootstrap, hydratePersistedEvaluationMappings, losesRequiredCoverage, planProductionEvaluation, replacementCandidates, replaceEvaluationExercise, resolveCompleteCoreTargets, resolvePhysicalDimensionTargets, type PersistedEvaluationMappingRow, type PhysicalDimensionResolution, type ProductionEvaluationTarget } from "../../lib/evaluation-production";
+import { buildCustomEvaluation } from "../../lib/evaluation-custom";
 import type { EvaluationEngineResult, EvaluationMappingDecision } from "../../lib/evaluation-session-engine";
 import type { Exercise, ExerciseSubcategory, Goalkeeper, PhysicalAssessmentDimension, PhysicalObjective } from "../../lib/types";
 import { ExerciseTacticalBoard } from "./exercise-tactical-board";
@@ -25,9 +26,11 @@ const statusLabel: Record<string, string> = { COVERED: "Coperto", PARTIALLY_COVE
 export function EvaluationSessionWizard(props: Props) {
   const [step, setStep] = useState(1);
   const [goalkeeperId, setGoalkeeperId] = useState("");
-  const [evaluationType, setEvaluationType] = useState<"Complete" | "Targeted">("Complete");
+  const [evaluationType, setEvaluationType] = useState<"Complete" | "Targeted" | "Custom">("Complete");
   const [technicalIds, setTechnicalIds] = useState<number[]>([]);
   const [dimensionIds, setDimensionIds] = useState<string[]>([]);
+  const [customExerciseIds, setCustomExerciseIds] = useState<string[]>([]);
+  const [exerciseSearch, setExerciseSearch] = useState("");
   const [date, setDate] = useState(today());
   const [duration, setDuration] = useState(70);
   const [minimumObservations, setMinimumObservations] = useState(2);
@@ -61,6 +64,15 @@ export function EvaluationSessionWizard(props: Props) {
   const decisions = useMemo(() => hydratePersistedEvaluationMappings(mappingRows, props.exercises, props.subcategories, props.physicalObjectives), [mappingRows, props.exercises, props.subcategories, props.physicalObjectives]);
   const targetCatalog = useMemo(() => buildProductionTargetCatalog(decisions, props.subcategories, props.physicalObjectives), [decisions, props.subcategories, props.physicalObjectives]);
   const core = useMemo(() => resolveCompleteCoreTargets(targetCatalog), [targetCatalog]);
+  const evaluableExerciseIds = useMemo(() => new Set(decisions.filter(item => item.active && item.mappingStatus === "auto_approved").map(item => item.mapping.exercise.id)), [decisions]);
+  const customExercises = useMemo(() => {
+    const query = exerciseSearch.trim().toLocaleLowerCase("it");
+    return props.exercises.filter(item => item.attivo && evaluableExerciseIds.has(item.id)).filter(item => !query || [item.codice, item.nome, item.categoria, item.sottocategoria].some(value => value.toLocaleLowerCase("it").includes(query)));
+  }, [props.exercises, evaluableExerciseIds, exerciseSearch]);
+  const customTargets = useMemo(() => {
+    const keys = new Set(decisions.filter(item => item.active && item.mappingStatus === "auto_approved" && customExerciseIds.includes(item.mapping.exercise.id)).map(item => `${item.mapping.targetType}:${item.mapping.targetId}`));
+    return targetCatalog.filter(target => keys.has(target.key));
+  }, [customExerciseIds, decisions, targetCatalog]);
 
   async function bootstrapMappings() {
     if (!supabase || !props.catalogAdmin) return;
@@ -77,11 +89,21 @@ export function EvaluationSessionWizard(props: Props) {
 
   function next() {
     if (step === 1 && !goalkeeperId) { props.onToast("Seleziona un portiere"); return; }
+    if (step === 2 && evaluationType === "Custom" && !customExerciseIds.length) { props.onToast("Seleziona almeno un esercizio dall’archivio"); return; }
     if (step === 3 && evaluationType === "Targeted" && !technicalIds.length && !dimensionIds.length) { props.onToast("Seleziona almeno un parametro tecnico o fisico"); return; }
     setStep(value => Math.min(6, value + 1));
   }
 
   function generateProposal() {
+    if (evaluationType === "Custom") {
+      const custom = buildCustomEvaluation({ exerciseIds: customExerciseIds, exercises: props.exercises, decisions, targets: targetCatalog, duration, minimumObservations });
+      if (!custom.result.selectedExercises.length || !custom.targets.length) { props.onToast("Gli esercizi scelti non hanno mapping valutativi approvati"); return; }
+      setPlannedTargets(custom.targets);
+      setDimensionCoverage([]);
+      setResult(custom.result);
+      setStep(6);
+      return;
+    }
     const physical = evaluationType === "Targeted" ? resolvePhysicalDimensionTargets(props.physicalDimensions, targetCatalog, decisions, dimensionIds) : [];
     const targets = evaluationType === "Complete"
       ? core.selected
@@ -138,10 +160,10 @@ export function EvaluationSessionWizard(props: Props) {
         ...result.coverageMatrix.map(row => ({ key: row.parameter.key, name: row.parameter.name, status: row.status, exercises: row.distinctExercises })),
         ...dimensionCoverage.map(item => ({ key: `DIMENSION:${item.dimension.id}`, name: item.dimension.nome, status: item.status, explanation: item.explanation, fis: item.selectedFis.map(fis => fis.name) })),
       ];
-      const { error } = await supabase.rpc("create_evaluation_training", {
+      const rpcName = evaluationType === "Custom" ? "create_custom_evaluation_training" : "create_evaluation_training";
+      const rpcArguments = {
         requested_goalkeeper_id: goalkeeperId,
         requested_training_date: date,
-        requested_evaluation_type: evaluationType,
         requested_duration: result.estimatedDuration,
         requested_minimum_observations: minimumObservations,
         requested_context_preference: contextPreference,
@@ -149,11 +171,12 @@ export function EvaluationSessionWizard(props: Props) {
         requested_targets: targetPayload,
         requested_exercises: exercisePayload,
         requested_coverage: coveragePayload,
-      });
+      };
+      const { error } = await supabase.rpc(rpcName, evaluationType === "Custom" ? rpcArguments : { ...rpcArguments, requested_evaluation_type: evaluationType });
       if (error) throw error;
       await props.onCreated();
       props.onToast("Seduta di valutazione creata e pronta in agenda");
-      setStep(1); setResult(null); setTechnicalIds([]); setDimensionIds([]); setNotes("");
+      setStep(1); setResult(null); setTechnicalIds([]); setDimensionIds([]); setCustomExerciseIds([]); setExerciseSearch(""); setNotes("");
     } catch (error) { props.onToast(`Seduta non creata: ${error instanceof Error ? error.message : "errore sconosciuto"}`); }
     finally { setBusy(false); }
   }
@@ -168,10 +191,10 @@ export function EvaluationSessionWizard(props: Props) {
 
     <section className="evaluation-step-card">
       {step === 1 && <><span className="eyebrow">Step 1</span><h2>Quale portiere vuoi valutare?</h2><div className="evaluation-choice-grid">{props.goalkeepers.filter(item => item.attivo).map(item => <button type="button" className={goalkeeperId === item.id ? "choice active" : "choice"} key={item.id} onClick={() => setGoalkeeperId(item.id)}><strong>{item.nome} {item.cognome}</strong><span>Portiere</span></button>)}</div></>}
-      {step === 2 && <><span className="eyebrow">Step 2</span><h2>Tipo di valutazione</h2><div className="evaluation-choice-grid three"><button className={evaluationType === "Complete" ? "choice active" : "choice"} onClick={() => { setEvaluationType("Complete"); setDuration(70); }}><strong>Completa</strong><span>Profilo generale · 6-8 esercizi · 60-80 minuti</span></button><button className={evaluationType === "Targeted" ? "choice active" : "choice"} onClick={() => { setEvaluationType("Targeted"); setDuration(45); }}><strong>Mirata</strong><span>Parametri selezionati · 30-60 minuti</span></button><button className="choice disabled" disabled><strong>Rivalutazione</strong><span>Prossimamente</span></button></div></>}
-      {step === 3 && <><span className="eyebrow">Step 3</span><h2>Parametri</h2>{evaluationType === "Complete" ? <><p>I sei core richiesti sono preselezionati; il motore aggiunge un pool opzionale affidabile.</p><div className="target-chip-grid">{core.required.map(item => <span className="target-chip required" key={item.key}>{item.name}<small>Core</small></span>)}{core.selected.filter(item => !core.required.includes(item)).map(item => <span className="target-chip" key={item.key}>{item.name}<small>Rotazione</small></span>)}</div></> : <div className="evaluation-parameter-columns"><div><h3>Tecnica</h3><p>Seleziona le sottocategorie da osservare.</p><div className="check-list">{props.subcategories.filter(item => item.attivo && item.fase !== "Generale").map(item => <label key={item.id}><input type="checkbox" checked={technicalIds.includes(item.id)} onChange={() => setTechnicalIds(values => values.includes(item.id) ? values.filter(id => id !== item.id) : [...values, item.id])}/><span>{item.nome}<small>{item.fase}</small></span></label>)}</div></div><div><h3>Fisico osservabile</h3><p>Seleziona dimensioni, non singoli FIS.</p><div className="check-list">{props.physicalDimensions.filter(item => item.attivo).map(item => <label key={item.id}><input type="checkbox" checked={dimensionIds.includes(item.id)} onChange={() => setDimensionIds(values => values.includes(item.id) ? values.filter(id => id !== item.id) : [...values, item.id])}/><span>{item.nome}<small>{item.descrizione}</small></span></label>)}</div></div></div>}</>}
+      {step === 2 && <><span className="eyebrow">Step 2</span><h2>Tipo di valutazione</h2><div className="evaluation-choice-grid four"><button type="button" className={evaluationType === "Complete" ? "choice active" : "choice"} onClick={() => { setEvaluationType("Complete"); setDuration(70); }}><strong>Completa</strong><span>Profilo generale · 6-8 esercizi · 60-80 minuti</span></button><button type="button" className={evaluationType === "Targeted" ? "choice active" : "choice"} onClick={() => { setEvaluationType("Targeted"); setDuration(45); }}><strong>Mirata</strong><span>Parametri selezionati · 30-60 minuti</span></button><button type="button" className={evaluationType === "Custom" ? "choice active" : "choice"} onClick={() => { setEvaluationType("Custom"); setDuration(45); }}><strong>Personalizzata</strong><span>Scegli tu da 1 a 6 esercizi dall’archivio</span></button><button type="button" className="choice disabled" disabled><strong>Rivalutazione</strong><span>Disponibile dallo storico</span></button></div>{evaluationType === "Custom" && <div className="custom-exercise-picker"><header><div><h3>Scegli gli esercizi</h3><p>Sono mostrati solo gli esercizi con parametri valutativi approvati.</p></div><strong>{customExerciseIds.length}/6 selezionati</strong></header><label className="custom-exercise-search">Cerca nell’archivio<input type="search" value={exerciseSearch} onChange={event => setExerciseSearch(event.target.value)} placeholder="Codice, nome, categoria o sottocategoria"/></label><div className="custom-exercise-list">{customExercises.map(item => { const selected = customExerciseIds.includes(item.id); return <label key={item.id} className={selected ? "selected" : ""}><input type="checkbox" checked={selected} onChange={() => setCustomExerciseIds(values => selected ? values.filter(id => id !== item.id) : values.length >= 6 ? (props.onToast("Puoi selezionare al massimo 6 esercizi"), values) : [...values, item.id])}/><span><b>{item.codice} · {item.nome}</b><small>{item.categoria} · {item.sottocategoria} · {item.fase} · {item.durata_min}′</small></span></label>; })}{!customExercises.length && <p className="custom-exercise-empty">Nessun esercizio valutabile corrisponde alla ricerca.</p>}</div></div>}</>}
+      {step === 3 && <><span className="eyebrow">Step 3</span><h2>Parametri</h2>{evaluationType === "Complete" ? <><p>I sei core richiesti sono preselezionati; il motore aggiunge un pool opzionale affidabile.</p><div className="target-chip-grid">{core.required.map(item => <span className="target-chip required" key={item.key}>{item.name}<small>Core</small></span>)}{core.selected.filter(item => !core.required.includes(item)).map(item => <span className="target-chip" key={item.key}>{item.name}<small>Rotazione</small></span>)}</div></> : evaluationType === "Custom" ? <><p>I parametri osservabili sono ricavati automaticamente dai mapping approvati degli esercizi che hai scelto.</p><div className="target-chip-grid">{customTargets.map(item => <span className="target-chip" key={item.key}>{item.name}<small>{item.targetType === "TECHNICAL" ? "Tecnico" : "Fisico"}</small></span>)}</div></> : <div className="evaluation-parameter-columns"><div><h3>Tecnica</h3><p>Seleziona le sottocategorie da osservare.</p><div className="check-list">{props.subcategories.filter(item => item.attivo && item.fase !== "Generale").map(item => <label key={item.id}><input type="checkbox" checked={technicalIds.includes(item.id)} onChange={() => setTechnicalIds(values => values.includes(item.id) ? values.filter(id => id !== item.id) : [...values, item.id])}/><span>{item.nome}<small>{item.fase}</small></span></label>)}</div></div><div><h3>Fisico osservabile</h3><p>Seleziona dimensioni, non singoli FIS.</p><div className="check-list">{props.physicalDimensions.filter(item => item.attivo).map(item => <label key={item.id}><input type="checkbox" checked={dimensionIds.includes(item.id)} onChange={() => setDimensionIds(values => values.includes(item.id) ? values.filter(id => id !== item.id) : [...values, item.id])}/><span>{item.nome}<small>{item.descrizione}</small></span></label>)}</div></div></div>}</>}
       {step === 4 && <><span className="eyebrow">Step 4</span><h2>Configurazione</h2><div className="evaluation-config-grid"><label>Data<input type="date" value={date} onChange={event => setDate(event.target.value)}/></label><label>Durata massima<input type="number" min={evaluationType === "Complete" ? 60 : 30} max={evaluationType === "Complete" ? 80 : 60} value={duration} onChange={event => setDuration(Number(event.target.value))}/></label><label>Osservazioni minime<input type="number" min="1" max="5" value={minimumObservations} onChange={event => setMinimumObservations(Number(event.target.value))}/></label><label>Preferenza contesti<select value={contextPreference} onChange={event => setContextPreference(event.target.value as ContextPreference)}><option>Bilanciata</option><option>Analitica</option><option>Situazionale</option><option>Percettiva</option></select></label><label className="wide">Note<textarea value={notes} onChange={event => setNotes(event.target.value)} placeholder="Indicazioni per la seduta…"/></label></div></>}
-      {step === 5 && <><span className="eyebrow">Step 5</span><h2>Genera la proposta</h2><p>Il motore userà esclusivamente mapping persistiti, attivi e approvati. Nessun protocol-only o mapping rejected entrerà nella seduta.</p><div className="evaluation-generation-summary"><span><b>{goalkeeper?.nome} {goalkeeper?.cognome}</b>Portiere</span><span><b>{evaluationType === "Complete" ? "Completa" : "Mirata"}</b>Tipo</span><span><b>{duration} min</b>Durata massima</span></div><button className="primary" onClick={generateProposal}>Genera proposta valutativa</button></>}
+      {step === 5 && <><span className="eyebrow">Step 5</span><h2>Genera la proposta</h2><p>{evaluationType === "Custom" ? "La proposta manterrà esattamente gli esercizi scelti e collegherà i relativi parametri approvati." : "Il motore userà esclusivamente mapping persistiti, attivi e approvati. Nessun protocol-only o mapping rejected entrerà nella seduta."}</p><div className="evaluation-generation-summary"><span><b>{goalkeeper?.nome} {goalkeeper?.cognome}</b>Portiere</span><span><b>{evaluationType === "Complete" ? "Completa" : evaluationType === "Targeted" ? "Mirata" : "Personalizzata"}</b>Tipo</span><span><b>{duration} min</b>Durata massima</span></div><button className="primary" onClick={generateProposal}>Genera proposta valutativa</button></>}
       {step === 6 && result && <EvaluationPreview result={result} targets={plannedTargets} dimensions={dimensionCoverage} decisions={decisions} exercises={props.exercises} onReplace={applyReplacement} onCreate={createSession} busy={busy}/>} 
       <div className="evaluation-step-actions">{step > 1 && step < 6 ? <button className="secondary" onClick={() => setStep(value => value - 1)}>Indietro</button> : <span/>}{step < 5 ? <button className="primary" onClick={next}>Continua</button> : null}{step === 6 ? <button className="secondary" onClick={() => setStep(4)}>Modifica configurazione</button> : null}</div>
     </section>

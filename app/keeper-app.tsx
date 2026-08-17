@@ -5,7 +5,7 @@ import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import type { AppSettings, CalendarDay, CalendarException, CatalogPhase, DiagramSource, EditableExerciseSelection, EditableGeneratedSession, Exercise, ExerciseCategory, ExerciseDifficulty, ExercisePhysicalObjective, ExerciseSubcategory, GenerationMode, Goalkeeper, PhysicalAssessmentDimension, PhysicalObjective, PriorityRankingItem, ScoredExerciseCandidate, Season, SeasonMatch, SeasonPhaseConfig, SeasonRecallPeriod, SeasonTrainingProfile, SessionBlock, SessionProfile, SessionQualityResult, TacticalDiagram, Training, TrainingExerciseVariant } from "../lib/types";
 import { ExerciseCard } from "./components/exercise-card";
 import { PhysicalObjectivesPage } from "./components/physical-objectives";
-import { ExercisePhysicalObjectivesEditor, type PhysicalMappingDraft } from "./components/exercise-physical-objectives-editor";
+import { ExercisePhysicalObjectivesEditor, NewExercisePhysicalObjectivesEditor, type PhysicalMappingDraft } from "./components/exercise-physical-objectives-editor";
 import { SeasonSettings, type SeasonConfiguration } from "./components/season-settings";
 import { SeasonAgenda } from "./components/season-agenda";
 import { CalendarDayModal } from "./components/calendar-day-modal";
@@ -25,6 +25,7 @@ import { EvaluationSessionWizard } from "./components/evaluation-session-wizard"
 import { EvaluationFieldMode } from "./components/evaluation-field-mode";
 import { ReassessmentWizard } from "./components/reassessment-wizard";
 import { buildGoalkeeperEvaluationHistory, type EvaluationHistoryInput, type GoalkeeperEvaluationHistorySession } from "../lib/evaluation-history";
+import { EvaluationPdfExportButton, TrainingPdfExportButton } from "./components/session-pdf-export";
 
 type Section = "archive" | "builder" | "agenda" | "physical" | "goalkeepers" | "evaluation";
 type ExerciseDraft = Omit<Exercise, "id" | "category" | "subcategory" | "physical_mappings">;
@@ -205,7 +206,7 @@ export function KeeperApp() {
   const [openCalendarDay, setOpenCalendarDay] = useState<CalendarDay | null>(null);
 
   const loadExercises = useCallback(async () => {
-    if (!supabase || !window.confirm("Eliminare definitivamente questa seduta?")) return;
+    if (!supabase) return;
     let { data, error } = await supabase.from("exercises").select("*, category:exercise_categories(*), subcategory:exercise_subcategories(*), physical_mappings:exercise_physical_objectives(id,exercise_id,physical_objective_id,ruolo,peso,motivazione,attivo,physical_objective:physical_objectives(*))").order("codice");
     if (error) {
       const legacyResult = await supabase.from("exercises").select("*, category:exercise_categories(*), subcategory:exercise_subcategories(*)").order("codice");
@@ -222,7 +223,7 @@ export function KeeperApp() {
   }, []);
 
   const loadCatalog = useCallback(async () => {
-    if (!supabase || !window.confirm("Eliminare definitivamente questa seduta?")) return;
+    if (!supabase) return;
     const [categoryResult, subcategoryResult] = await Promise.all([
       supabase.from("exercise_categories").select("id,nome,attivo").eq("attivo", true).order("id"),
       supabase.from("exercise_subcategories").select("id,category_id,nome,fase,attivo").eq("attivo", true).order("id"),
@@ -236,7 +237,7 @@ export function KeeperApp() {
   }, []);
 
   const loadPhysicalObjectives = useCallback(async () => {
-    if (!supabase || !window.confirm("Eliminare definitivamente questa seduta?")) return;
+    if (!supabase) return;
     const { data, error } = await supabase.from("physical_objectives").select("*").eq("attivo", true).order("codice");
     if (!error) setPhysicalObjectives((data ?? []) as PhysicalObjective[]);
   }, []);
@@ -740,7 +741,7 @@ export function KeeperApp() {
     setToast("Eccezione rimossa");
   }
 
-  async function saveExercise(draft: ExerciseDraft) {
+  async function saveExercise(draft: ExerciseDraft, newPhysicalMappings: PhysicalMappingDraft[] = []) {
     if (!supabase) return;
     const existing = editingExercise !== "new" ? editingExercise : null;
     const selectedCategory = exerciseCategories.find(item => item.id === draft.category_id);
@@ -749,10 +750,24 @@ export function KeeperApp() {
     const payload = { ...draft, categoria: selectedCategory.nome, sottocategoria: selectedSubcategory.nome, fase: selectedSubcategory.fase, variante: draft.variante || null };
     const result = existing
       ? await supabase.from("exercises").update(payload).eq("id", existing.id)
-      : await supabase.from("exercises").insert(payload);
+      : await supabase.from("exercises").insert(payload).select("id").single();
     if (result.error) {
       setToast(`Esercizio non salvato: ${result.error.message}`);
       return;
+    }
+    if (!existing && result.data && newPhysicalMappings.length) {
+      const exerciseId = String((result.data as { id: string }).id);
+      for (const mapping of newPhysicalMappings) {
+        const { error } = await supabase.rpc("set_exercise_physical_objective", {
+          requested_exercise_id: exerciseId,
+          requested_physical_objective_id: mapping.physical_objective_id,
+          requested_role: mapping.ruolo,
+          requested_weight: mapping.peso,
+          requested_reason: mapping.motivazione,
+          requested_active: true,
+        });
+        if (error) { await loadExercises(); setEditingExercise(null); setToast(`Esercizio creato, ma una caratteristica fisica non è stata salvata: ${error.message}`); return; }
+      }
     }
     setEditingExercise(null);
     await loadExercises();
@@ -1016,7 +1031,7 @@ function ExerciseEditorModal({ exercise, categories, subcategories, physicalObje
   subcategories: ExerciseSubcategory[];
   physicalObjectives: PhysicalObjective[];
   onClose: () => void;
-  onSave: (draft: ExerciseDraft) => Promise<void>;
+  onSave: (draft: ExerciseDraft, physicalMappings?: PhysicalMappingDraft[]) => Promise<void>;
   onSavePhysicalMapping: (exercise: Exercise, draft: PhysicalMappingDraft) => Promise<void>;
   onRemovePhysicalMapping: (mapping: ExercisePhysicalObjective) => Promise<void>;
 }) {
@@ -1028,6 +1043,7 @@ function ExerciseEditorModal({ exercise, categories, subcategories, physicalObje
   const [draft, setDraft] = useState<ExerciseDraft>(initial);
   const [saving, setSaving] = useState(false);
   const [mappingBusyId, setMappingBusyId] = useState<string | null>(null);
+  const [newPhysicalMappings, setNewPhysicalMappings] = useState<PhysicalMappingDraft[]>([]);
   const [diagramEditor, setDiagramEditor] = useState<{ diagram: TacticalDiagram; origin: "automatic" | "edit" } | null>(null);
   const validSubcategories = subcategories.filter(item => item.category_id === draft.category_id && item.fase === draft.fase);
   const set = <K extends keyof ExerciseDraft>(key: K, value: ExerciseDraft[K]) => setDraft(current => ({ ...current, [key]: value }));
@@ -1052,7 +1068,7 @@ function ExerciseEditorModal({ exercise, categories, subcategories, physicalObje
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setSaving(true);
-    await onSave(draft);
+    await onSave(draft, exercise ? undefined : newPhysicalMappings);
     setSaving(false);
   }
   async function savePhysicalMapping(mappingDraft: PhysicalMappingDraft) {
@@ -1115,6 +1131,7 @@ function ExerciseEditorModal({ exercise, categories, subcategories, physicalObje
         {draft.tactical_diagram && <div className="diagram-status"><span>Schema presente</span><small>Origine: {draft.diagram_source === "automatic" ? "automatico" : draft.diagram_source === "automatic_edited" ? "automatico modificato" : "manuale"}</small></div>}
       </section>
       {diagramEditor && <div className="field full"><TacticalDiagramEditor exercise={exerciseForDiagram()} value={diagramEditor.diagram} onCancel={() => setDiagramEditor(null)} onSave={diagram => { const automatic = diagramEditor.origin === "automatic"; setDraft(current => ({ ...current, tactical_diagram: diagram, diagram_source: automatic ? "automatic" : current.diagram_source === "automatic" ? "automatic_edited" : "manual", diagram_updated_at: new Date().toISOString() })); setDiagramEditor(null); }} /></div>}
+      {!exercise && <NewExercisePhysicalObjectivesEditor mappings={newPhysicalMappings} objectives={physicalObjectives} onChange={setNewPhysicalMappings} />}
       <div className="field full checkbox-field"><label><input type="checkbox" checked={draft.attivo} onChange={event => set("attivo", event.target.checked)} /> Esercizio attivo</label></div>
     </div>
     <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Annulla</button><button className="primary" disabled={saving}>{saving ? "Salvataggio…" : "Salva esercizio"}</button></div>
@@ -1155,14 +1172,14 @@ function PlannerTrainingModal({ training, catalog, goalkeepers, categories, phys
     const evaluatedGoalkeeper = goalkeepers.find(item => item.id === training.evaluation_session?.goalkeeper_id);
     const evaluationAction = training.evaluation_session.status === "Completed" ? "Vedi risultati" : training.evaluation_session.status === "InProgress" ? "Continua valutazione" : "Avvia valutazione";
     return <><div className="modal-backdrop" onClick={onClose}><div className="modal training-detail-modal rich-training-modal evaluation-training-modal" onClick={event => event.stopPropagation()}><button className="training-modal-close" onClick={onClose} aria-label="Chiudi finestra" title="Chiudi">×</button>
-      <div className="evaluation-training-heading"><div><span className="evaluation-badge">VALUTAZIONE</span><span className="evaluation-type-badge">{training.evaluation_session.evaluation_type === "Complete" ? "Completa" : "Mirata"}</span><h2>{new Date(`${training.training_date}T12:00:00`).toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</h2><p>{training.planned_duration_minutes} minuti · {displayItems.length} esercizi · Stato {training.evaluation_session.status}</p></div><div className="evaluation-goalkeeper-panel"><small>Portiere valutato</small><strong>{evaluatedGoalkeeper ? `${evaluatedGoalkeeper.nome} ${evaluatedGoalkeeper.cognome}` : "Portiere"}</strong><span>Minimo {training.evaluation_session.minimum_observations} osservazioni</span></div></div>
+      <div className="evaluation-training-heading"><div><span className="evaluation-badge">VALUTAZIONE</span><span className="evaluation-type-badge">{training.evaluation_session.evaluation_type === "Complete" ? "Completa" : training.evaluation_session.evaluation_type === "Targeted" ? "Mirata" : training.evaluation_session.evaluation_type === "Custom" ? "Personalizzata" : "Rivalutazione"}</span><h2>{new Date(`${training.training_date}T12:00:00`).toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</h2><p>{training.planned_duration_minutes} minuti · {displayItems.length} esercizi · Stato {training.evaluation_session.status}</p></div><div className="evaluation-goalkeeper-panel"><small>Portiere valutato</small><strong>{evaluatedGoalkeeper ? `${evaluatedGoalkeeper.nome} ${evaluatedGoalkeeper.cognome}` : "Portiere"}</strong><span>Minimo {training.evaluation_session.minimum_observations} osservazioni</span></div></div>
       <div className="evaluation-saved-exercises">{displayItems.map((item,index)=><SessionExerciseCard key={item.id} item={item} number={index+1} goalkeeperName={goalkeeperName} onOpen={()=>onOpenExercise(item.exercise,item.plannedDuration,item.variants)}/>)}</div>
-      <div className="training-modal-footer"><button className="primary evaluation-launch-button" onClick={()=>setEvaluationMode(training.evaluation_session?.status === "Completed" ? "results" : "field")}>{evaluationAction}</button><button className="training-icon-action delete" onClick={onDelete} aria-label="Elimina seduta" title="Elimina seduta">🗑</button></div></div></div>{evaluationMode&&<EvaluationFieldMode sessionId={training.evaluation_session.id} initialMode={evaluationMode} onSessionChanged={onSessionChanged} onClose={()=>{setEvaluationMode(null);onClose();}}/>}</>;
+      <div className="training-modal-footer"><button className="primary evaluation-launch-button" onClick={()=>setEvaluationMode(training.evaluation_session?.status === "Completed" ? "results" : "field")}>{evaluationAction}</button><EvaluationPdfExportButton sessionId={training.evaluation_session.id}/><button className="training-icon-action delete" onClick={onDelete} aria-label="Elimina seduta" title="Elimina seduta">🗑</button></div></div></div>{evaluationMode&&<EvaluationFieldMode sessionId={training.evaluation_session.id} initialMode={evaluationMode} onSessionChanged={onSessionChanged} onClose={()=>{setEvaluationMode(null);onClose();}}/>}</>;
   }
   return <><div className="modal-backdrop" onClick={onClose}><div className="modal training-detail-modal rich-training-modal" onClick={event => event.stopPropagation()}><button className="training-modal-close" onClick={onClose} aria-label="Chiudi finestra" title="Chiudi">×</button>
     <SessionOverviewHeader date={training.training_date} matchDay={training.session_profile_code||(training.match_day_offset!==null&&training.match_day_offset!==undefined?`MD${training.match_day_offset}`:"MD")} seasonPhase={phase?.tipo??"Non specificata"} duration={training.planned_duration_minutes} load={training.planned_load||((training.session_profile_snapshot as SessionProfile|undefined)?.load)||"Non specificato"} goalkeeperCount={training.goalkeeper_count} technicalPrimary={technicalPrimary} technicalSecondary={technicalSecondary} physicalPrimary={physicalPrimary} goalkeeperNames={selectedGoalkeepers.map(item=>`${item.nome} ${item.cognome}`)} quality={quality} onFieldMode={()=>setFieldMode(true)}/>
     <div className="saved-session-blocks">{blocks.map((block,index)=>{const items=groupSessionExercises(displayItems,block.ordine);const isOpen=expanded[block.ordine]??true;const blockTechnical=categories.find(item=>item.id===block.technical_category_id)?.nome;const blockPhysical=physicalDimensions.find(item=>item.id===block.physical_dimension_id)?.nome;return <article className={`generated-block rich-block ${isOpen?"open":"collapsed"}`} key={block.ordine}><header><button className="block-collapse" onClick={()=>setExpanded(current=>({...current,[block.ordine]:!isOpen}))} aria-expanded={isOpen} aria-label={`${isOpen?"Comprimi":"Espandi"} blocco ${String.fromCharCode(65+index)}`}><b>{String.fromCharCode(65+index)}</b><span>{isOpen?"⌃":"⌄"}</span></button><div className="rich-block-heading"><strong>{block.tipo_blocco}</strong><small>{block.durata_target} min · {items.length} {items.length===1?"esercizio":"esercizi"}</small></div><div className="rich-block-targets"><span>{block.fase_metodologica_preferita||"Fase libera"}</span><span>Carico {block.carico_target||"libero"}</span>{blockTechnical&&<span>Focus {blockTechnical}</span>}{blockPhysical&&<span>Fisico {blockPhysical}</span>}</div></header>{isOpen&&<div className="rich-block-body">{items.length?items.map(item=><SessionExerciseCard key={item.id} item={item} number={displayItems.findIndex(candidate=>candidate.id===item.id)+1} goalkeeperName={goalkeeperName} onOpen={()=>onOpenExercise(item.exercise,item.plannedDuration,item.variants)}/>):<p className="planner-empty">Nessun esercizio salvato in questo blocco.</p>}</div>}</article>})}</div>
-    <div className="training-modal-footer"><button className="training-icon-action edit" onClick={onEdit} aria-label="Modifica seduta" title="Modifica seduta">✎</button><button className="training-icon-action delete" onClick={onDelete} aria-label="Elimina seduta" title="Elimina seduta">🗑</button></div></div></div>{fieldMode&&<SessionFieldMode items={displayItems} blocks={blocks} goalkeeperName={goalkeeperName} onClose={()=>setFieldMode(false)}/>}</>;
+    <div className="training-modal-footer"><TrainingPdfExportButton data={{title:training.notes?.trim()||`Seduta ${technicalPrimary}`,date:training.training_date,duration:training.planned_duration_minutes,goalkeeperNames:selectedGoalkeepers.map(item=>`${item.nome} ${item.cognome}`),goalkeeperCount:training.goalkeeper_count,phase:phase?.tipo??"Non specificata",technicalObjectives:[technicalPrimary,technicalSecondary,...training.training_objectives.map(item=>item.objective)].filter((item):item is string=>Boolean(item)),physicalObjectives:[physicalPrimary],exercises:displayItems}}/><button className="training-icon-action edit" onClick={onEdit} aria-label="Modifica seduta" title="Modifica seduta">✎</button><button className="training-icon-action delete" onClick={onDelete} aria-label="Elimina seduta" title="Elimina seduta">🗑</button></div></div></div>{fieldMode&&<SessionFieldMode items={displayItems} blocks={blocks} goalkeeperName={goalkeeperName} onClose={()=>setFieldMode(false)}/>}</>;
 }
 
 function TrainingModal({ training, onClose, onEdit, onDelete }: { training: Training; onClose: () => void; onEdit: () => void; onDelete: () => void }) {

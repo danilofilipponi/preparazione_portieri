@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { finalDecisionForMapping } from "../lib/complete-evaluation-design.ts";
+import { buildCustomEvaluation } from "../lib/evaluation-custom.ts";
 import { CORE_OPTIONAL_NAMES, CORE_REQUIRED_NAMES, buildProductionTargetCatalog, resolvePhysicalDimensionTargets } from "../lib/evaluation-production.ts";
+import type { ProductionEvaluationTarget } from "../lib/evaluation-production.ts";
 import type { EvaluationMapping } from "../lib/evaluation-mapping-audit.ts";
 import type { EvaluationMappingDecision } from "../lib/evaluation-session-engine.ts";
 import type { Exercise, PhysicalAssessmentDimension, PhysicalObjective } from "../lib/types.ts";
@@ -73,4 +75,25 @@ test("il bootstrap idempotente protegge le decisioni manuali", () => {
   assert.match(sql, /on conflict \(exercise_id, physical_objective_id\)[\s\S]*do update/i);
   assert.match(sql, /where public\.exercise_evaluation_targets\.decision_source = 'bootstrap'/i);
   assert.match(sql, /decision_source = 'manual'/i);
+});
+
+test("Personalizzata conserva esattamente gli esercizi scelti e deriva i target approvati", () => {
+  const first = exercise("CUSTOM-1"), second = exercise("CUSTOM-2"), ignored = exercise("CUSTOM-3");
+  const makeDecision = (item: Exercise): EvaluationMappingDecision => ({ mapping: { id: `mapping-${item.id}`, exercise: item, targetType: "TECHNICAL", targetId: "7", targetCode: "SUB-7", targetName: "Presa alta", aggregateName: "Tecnica", role: "PRIMARY", evaluationSuitability: .9, observabilityWeight: .9, specificityWeight: .9, confidence: "HIGH", evidenceNotes: "Test", tacticalFamily: "SHOT_SAVE", complexity: "LOW" }, mappingStatus: "auto_approved", active: true, reason: "test" });
+  const target: ProductionEvaluationTarget = { key: "TECHNICAL:7", targetType: "TECHNICAL", targetId: "7", code: "SUB-7", name: "Presa alta", aggregateName: "Tecnica", health: "STRONG", requiredObservations: 2, requiredDistinctExercises: 2, priority: 5, technicalSubcategoryId: 7, physicalObjectiveId: null, physicalDimensionId: null, physicalDimensionName: null };
+  const custom = buildCustomEvaluation({ exerciseIds: [second.id, first.id], exercises: [first, second, ignored], decisions: [makeDecision(first), makeDecision(second)], targets: [target], duration: 45, minimumObservations: 2 });
+  assert.equal(custom.result.evaluationType, "Custom");
+  assert.deepEqual(custom.result.selectedExercises.map(item => item.exercise.id), [second.id, first.id]);
+  assert.equal(custom.result.selectedExercises.some(item => item.exercise.id === ignored.id), false);
+  assert.deepEqual(custom.targets.map(item => item.key), ["TECHNICAL:7"]);
+  assert.equal(custom.result.coverageMatrix[0].status, "COVERED");
+});
+
+test("migration Personalizzata riusa la RPC protetta senza alterare RLS", () => {
+  const sql = readFileSync(new URL("../supabase/migrations/0036_custom_evaluation_sessions.sql", import.meta.url), "utf8");
+  assert.match(sql, /check \(evaluation_type in \('Complete','Targeted','Custom','Reassessment'\)\)/i);
+  assert.match(sql, /current_owner uuid := auth\.uid\(\)/i);
+  assert.match(sql, /public\.create_evaluation_training\([\s\S]*'Targeted'/i);
+  assert.match(sql, /grant execute on function public\.create_custom_evaluation_training[\s\S]*to authenticated/i);
+  assert.doesNotMatch(sql, /create policy|alter policy|disable row level security/i);
 });

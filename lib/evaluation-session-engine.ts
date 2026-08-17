@@ -1,7 +1,7 @@
 import type { EvaluationMapping, EvaluationMappingAuditReport, EvaluationTargetType, ParameterCoverage, PhysicalFeasibility } from "./evaluation-mapping-audit.ts";
 import type { Exercise } from "./types.ts";
 
-export type EvaluationType = "Complete" | "Targeted" | "Reassessment";
+export type EvaluationType = "Complete" | "Targeted" | "Custom" | "Reassessment";
 export type MappingStatus = "auto_approved" | "needs_review" | "rejected";
 export type CoverageStatus = "COVERED" | "PARTIALLY_COVERED" | "NOT_COVERED" | "REQUIRES_PROTOCOL";
 
@@ -20,6 +20,7 @@ export const EVALUATION_SELECTION_WEIGHTS = Object.freeze({
 export const EVALUATION_SESSION_DEFAULTS: Readonly<Record<EvaluationType, { duration: number; minimumDuration: number; maximumDuration: number; minimumExercises: number; maximumExercises: number }>> = Object.freeze({
   Complete: { duration: 70, minimumDuration: 60, maximumDuration: 80, minimumExercises: 6, maximumExercises: 8 },
   Targeted: { duration: 45, minimumDuration: 30, maximumDuration: 60, minimumExercises: 3, maximumExercises: 6 },
+  Custom: { duration: 45, minimumDuration: 30, maximumDuration: 60, minimumExercises: 1, maximumExercises: 6 },
   Reassessment: { duration: 30, minimumDuration: 20, maximumDuration: 45, minimumExercises: 2, maximumExercises: 5 },
 });
 

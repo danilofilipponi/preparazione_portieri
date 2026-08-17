@@ -20,7 +20,7 @@ type Props = {
   onReassess: (sessionId: string) => void;
 };
 
-type SessionFilter = "ALL" | "Complete" | "Targeted" | "Reassessment";
+type SessionFilter = "ALL" | "Complete" | "Targeted" | "Custom" | "Reassessment";
 type View = "timeline" | "parameters" | "profiles" | "comparison";
 
 const profiles: HistoryProfile[] = ["TECHNICAL PROFILE", "PERCEPTUAL / DECISIONAL PROFILE", "PHYSICAL OBSERVABLE PROFILE"];
@@ -97,7 +97,7 @@ export function GoalkeeperEvaluationHistory({ sessions, onOpenResults, onCreateE
       <article><span>Ultima valutazione</span><strong>{latest ? dateLabel(latest.date) : "—"}</strong></article>
       <article><span>Sedute completate</span><strong>{sessions.length}</strong></article>
       <article><span>Complete</span><strong>{completeSessions.length}</strong></article>
-      <article><span>Mirate</span><strong>{sessions.filter(item => item.evaluationType === "Targeted").length}</strong></article>
+      <article><span>Mirate</span><strong>{sessions.filter(item => item.evaluationType === "Targeted").length}</strong></article><article><span>Personalizzate</span><strong>{sessions.filter(item => item.evaluationType === "Custom").length}</strong></article>
     </div>
     {recentParameters.length > 0 && <div className="history-focus"><span>Parametri osservati di recente</span><div>{recentParameters.map(item => <small key={item}>{item}</small>)}</div></div>}
 
@@ -106,7 +106,7 @@ export function GoalkeeperEvaluationHistory({ sessions, onOpenResults, onCreateE
     </div>
 
     {view !== "comparison" && <div className="history-filters">
-      <label><span>Tipo seduta</span><select value={sessionFilter} onChange={event => setSessionFilter(event.target.value as SessionFilter)}><option value="ALL">Tutte</option><option value="Complete">Complete</option><option value="Targeted">Mirate</option><option value="Reassessment">Rivalutazioni</option></select></label>
+      <label><span>Tipo seduta</span><select value={sessionFilter} onChange={event => setSessionFilter(event.target.value as SessionFilter)}><option value="ALL">Tutte</option><option value="Complete">Complete</option><option value="Targeted">Mirate</option><option value="Custom">Personalizzate</option><option value="Reassessment">Rivalutazioni</option></select></label>
       <label><span>Profilo</span><select value={profileFilter} onChange={event => setProfileFilter(event.target.value as HistoryProfile | "ALL")}><option value="ALL">Tutti i profili</option>{profiles.map(profile => <option key={profile} value={profile}>{profileLabels[profile]}</option>)}</select></label>
       <label className="history-search"><span>Cerca parametro</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Es. presa alta" /></label>
     </div>}
@@ -126,14 +126,14 @@ function Timeline({ sessions, allSessions, onOpenResults, onReassess }: { sessio
     const baseline = session.baselineSessionId ? allSessions.find(item => item.id === session.baselineSessionId) ?? null : null;
     const chain = session.evaluationType === "Reassessment" ? buildReassessmentChain(allSessions, session.id) : [];
     return <article className="history-session-card" key={session.id}>
-      <div className="history-session-date"><time dateTime={session.date}>{dateLabel(session.date)}</time><span>{session.evaluationType === "Complete" ? "Completa" : session.evaluationType === "Targeted" ? "Mirata" : "Rivalutazione"}</span>{baseline && <button className="history-baseline-link" onClick={() => onOpenResults(baseline.id)}>Baseline: {dateLabel(baseline.date)}</button>}</div>
+      <div className="history-session-date"><time dateTime={session.date}>{dateLabel(session.date)}</time><span>{session.evaluationType === "Complete" ? "Completa" : session.evaluationType === "Targeted" ? "Mirata" : session.evaluationType === "Custom" ? "Personalizzata" : "Rivalutazione"}</span>{baseline && <button className="history-baseline-link" onClick={() => onOpenResults(baseline.id)}>Baseline: {dateLabel(baseline.date)}</button>}</div>
       <div className="history-session-body">
         <div className="history-session-metrics"><span><b>{session.durationMinutes}</b> min</span><span><b>{session.exerciseCount}</b> esercizi</span><span><b>{session.parameters.filter(item => item.state === "EVALUATED").length}</b> valutati</span><span><b>{session.parameters.filter(item => item.state !== "EVALUATED").length}</b> non valutati</span></div>
         <div className="history-session-focus">{session.parameters.slice(0, 5).map(parameter => <small key={parameter.key}>{parameter.name}</small>)}</div>
         <div className="history-reliability-row">{Object.entries(reliability).filter(([, count]) => count > 0).map(([key, count]) => <span key={key} className={`reliability-${key.toLowerCase()}`}>{reliabilityLabels[key as keyof typeof reliabilityLabels]} {count}</span>)}</div>
       </div>
       <div className="history-session-actions"><button className="secondary" onClick={() => onOpenResults(session.id)}>Vedi risultati</button><button onClick={() => onReassess(session.id)}>Rivaluta</button></div>
-      {chain.length > 1 && <div className="reassessment-chain"><strong>Percorso valutativo</strong>{chain.map((item, index) => <span key={item.id}>{index > 0 && "→ "}{item.evaluationType === "Reassessment" ? "Rivalutazione" : item.evaluationType === "Complete" ? "Baseline completa" : "Baseline mirata"} · {dateLabel(item.date)}</span>)}</div>}
+      {chain.length > 1 && <div className="reassessment-chain"><strong>Percorso valutativo</strong>{chain.map((item, index) => <span key={item.id}>{index > 0 && "→ "}{item.evaluationType === "Reassessment" ? "Rivalutazione" : item.evaluationType === "Complete" ? "Baseline completa" : item.evaluationType === "Custom" ? "Baseline personalizzata" : "Baseline mirata"} · {dateLabel(item.date)}</span>)}</div>}
       {baseline && <BaselineComparison baseline={baseline} reassessment={session} />}
     </article>;
   })}</div>;

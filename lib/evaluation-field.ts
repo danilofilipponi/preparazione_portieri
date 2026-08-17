@@ -44,7 +44,7 @@ export type EvaluationFieldPayload = {
     id: string;
     training_id: string;
     status: "Ready" | "InProgress" | "Completed" | "Cancelled" | "Draft";
-    evaluation_type: "Complete" | "Targeted" | "Reassessment";
+    evaluation_type: "Complete" | "Targeted" | "Custom" | "Reassessment";
     started_at: string | null;
     completed_at: string | null;
     minimum_observations: number;

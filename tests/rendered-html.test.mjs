@@ -208,6 +208,10 @@ test("importa 196 compatibilità fisiche e le gestisce nel catalogo tecnico", as
   assert.match(card, /Componenti fisiche/);
   assert.match(card, /repeat\(5 - mapping\.peso\)/);
   assert.match(editor, /Obiettivi fisici associati/);
+  assert.match(editor, /Caratteristiche fisiche/);
+  assert.match(editor, /NewExercisePhysicalObjectivesEditor/);
+  assert.match(app, /newPhysicalMappings/);
+  assert.match(app, /insert\(payload\)\.select\("id"\)\.single\(\)/);
   assert.match(editor, /Principale.*Secondario.*Complementare/s);
   assert.match(migration, /create table if not exists public\.exercise_physical_objectives/);
   assert.match(migration, /unique \(exercise_id, physical_objective_id\)/);
@@ -433,3 +437,14 @@ test("genera esercizi ranked nei blocchi con snapshot senza duplicare il catalog
 test("rende la seduta modificabile con lock, alternative, qualità e varianti",async()=>{const migration=await readFile(new URL("../supabase/migrations/0024_session_editor_quality.sql",import.meta.url),"utf8");const preview=await readFile(new URL("../app/components/session-exercise-preview.tsx",import.meta.url),"utf8");const card=await readFile(new URL("../app/components/session-exercise-card.tsx",import.meta.url),"utf8");const quality=await readFile(new URL("../lib/session-planner/session-quality.ts",import.meta.url),"utf8");assert.match(migration,/locked boolean/);assert.match(migration,/session_generation_snapshot/);assert.match(migration,/training_exercise_changes/);assert.match(migration,/training_exercise_goalkeeper_variants/);assert.doesNotMatch(migration,/insert into public\.(?:exercises|exercise_physical_objectives)/i);assert.match(preview,/Rigenera esercizi/);assert.match(preview,/Rigenera blocco/);assert.match(card,/Sostituisci/);assert.match(quality,/SESSION_QUALITY_WEIGHTS/);assert.match(quality,/technical:.20.*physical:.15.*duration:.10/s);});
 
 test("mostra esercizi nei blocchi con scheda completa e modalità campo",async()=>{const app=await readFile(new URL("../app/keeper-app.tsx",import.meta.url),"utf8");const preview=await readFile(new URL("../app/components/session-exercise-preview.tsx",import.meta.url),"utf8");const card=await readFile(new URL("../app/components/session-exercise-card.tsx",import.meta.url),"utf8");const field=await readFile(new URL("../app/components/session-field-mode.tsx",import.meta.url),"utf8");assert.match(preview,/groupSessionExercises/);assert.match(preview,/SessionExerciseCard/);assert.match(app,/catalogById/);assert.match(card,/Perché è stato scelto/);assert.match(card,/ExerciseTacticalBoard/);assert.match(field,/Precedente/);assert.match(field,/Successivo/);assert.match(field,/ExerciseTacticalBoard/);assert.doesNotMatch(field,/technical_fit|physical_fit|rotation_score/);});
+
+test("il caricamento iniziale non apre conferme distruttive", async () => {
+  const app = await readFile(new URL("../app/keeper-app.tsx", import.meta.url), "utf8");
+  for (const loader of ["loadExercises", "loadCatalog", "loadPhysicalObjectives"]) {
+    const start = app.indexOf(`const ${loader} = useCallback`);
+    const end = app.indexOf("}, []);", start);
+    assert.ok(start >= 0 && end > start, `${loader} deve essere presente`);
+    assert.doesNotMatch(app.slice(start, end), /window\.confirm/);
+  }
+  assert.match(app, /async function deleteTraining[\s\S]*?window\.confirm\("Eliminare definitivamente questa seduta\?"\)/);
+});

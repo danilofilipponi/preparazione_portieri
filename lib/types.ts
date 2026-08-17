@@ -187,7 +187,7 @@ export type Training = {
 
 export type EvaluationSessionSummary = {
   id: string;
-  evaluation_type: "Complete" | "Targeted" | "Reassessment";
+  evaluation_type: "Complete" | "Targeted" | "Custom" | "Reassessment";
   status: "Draft" | "Ready" | "InProgress" | "Completed" | "Cancelled";
   goalkeeper_id: string;
   minimum_observations: number;

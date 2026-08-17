@@ -13,14 +13,14 @@ export const tacticalWidePerspectiveStrength: Record<TacticalRenderContext, numb
   compact: 0.045,
   detail: 0.075,
   field: 0.065,
-  editor: 0,
+  editor: 0.065,
 };
 
 export const tacticalHorizontalExpansion: Record<TacticalRenderContext, number> = {
   compact: 0.96,
   detail: 0.93,
   field: 0.96,
-  editor: 1,
+  editor: 0.96,
 };
 
 /** Proiezione esclusivamente visuale: il JSON tattico continua a usare coordinate 2D 0–100. */
@@ -28,6 +28,13 @@ export function projectTacticalPoint(x: number, y: number, strength: number, hor
   const depth = Math.max(0, Math.min(1, y / 100));
   const horizontalScale = 1 - strength * (1 - depth);
   return { x: 50 + (x - 50) * horizontalScale * horizontalExpansion, y };
+}
+
+/** Converte il punto visuale prospettico nelle coordinate 2D 0–100 salvate nel diagramma. */
+export function unprojectTacticalPoint(x: number, y: number, strength: number, horizontalExpansion = 1): TacticalProjectedPoint {
+  const depth = Math.max(0, Math.min(1, y / 100));
+  const horizontalScale = (1 - strength * (1 - depth)) * horizontalExpansion;
+  return { x: horizontalScale ? 50 + (x - 50) / horizontalScale : x, y };
 }
 
 export function projectTacticalScale(y: number, strength: number) {

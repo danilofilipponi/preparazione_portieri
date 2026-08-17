@@ -1,7 +1,7 @@
 import { EVALUATION_PRESENTATION_DIMENSIONS, reliabilityFor, type EvaluationReliability } from "./evaluation-field.ts";
 import { aggregateParameterScore } from "./evaluation-session-engine.ts";
 
-export type HistoryEvaluationType = "Complete" | "Targeted" | "Reassessment";
+export type HistoryEvaluationType = "Complete" | "Targeted" | "Custom" | "Reassessment";
 export type ComparabilityLevel = "COMPARABLE" | "PARTIALLY_COMPARABLE" | "LOW_COMPARABILITY" | "NOT_COMPARABLE";
 export type HistoryProfile = "TECHNICAL PROFILE" | "PERCEPTUAL / DECISIONAL PROFILE" | "PHYSICAL OBSERVABLE PROFILE";
 
@@ -294,7 +294,7 @@ export function compareHistorySessions(previous: GoalkeeperEvaluationHistorySess
   else if (previous.evaluationType === "Targeted" && current.evaluationType === "Targeted" && targetOverlap < .5) level = targetOverlap === 0 ? "NOT_COMPARABLE" : "LOW_COMPARABILITY";
   else if (previous.evaluationType !== current.evaluationType) level = "PARTIALLY_COMPARABLE";
   else level = parameterComparisons.reduce<ComparabilityLevel>((best, item) => comparabilityRank[item.comparison.level] < comparabilityRank[best] ? item.comparison.level : best, "COMPARABLE");
-  if (previous.evaluationType === current.evaluationType) reasons.push(`Entrambe le valutazioni sono ${previous.evaluationType === "Complete" ? "Complete" : "Mirate"}.`);
+  if (previous.evaluationType === current.evaluationType) reasons.push(`Entrambe le valutazioni sono ${previous.evaluationType === "Complete" ? "Complete" : previous.evaluationType === "Targeted" ? "Mirate" : previous.evaluationType === "Custom" ? "Personalizzate" : "Rivalutazioni"}.`);
   else reasons.push("Tipologie differenti: confronto consentito soltanto sui parametri comuni.");
   reasons.push(`${commonParameterKeys.length} parametri comuni; sovrapposizione target ${Math.round(targetOverlap * 100)}%.`);
   return { level, targetOverlap, commonParameterKeys, parameterComparisons, reasons };
