@@ -120,6 +120,18 @@ export type Exercise = {
   category?: ExerciseCategory;
   subcategory?: ExerciseSubcategory;
   physical_mappings?: ExercisePhysicalObjective[];
+  evaluation_mappings?: ExerciseEvaluationMapping[];
+};
+
+export type ExerciseEvaluationMapping = {
+  id: string;
+  exercise_id: string;
+  target_type: "Technical" | "Physical";
+  technical_subcategory_id: number | null;
+  physical_objective_id: string | null;
+  evidence_notes: string;
+  mapping_status: "auto_approved" | "needs_review" | "rejected";
+  attivo: boolean;
 };
 
 export type SessionExerciseSource = "legacy" | "generated" | "manual" | "replacement" | "regenerated";

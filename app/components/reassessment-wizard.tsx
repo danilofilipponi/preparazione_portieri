@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { loadAllEvaluationMappings } from "../../lib/evaluation-mapping-data";
 import { buildProductionTargetCatalog, hydratePersistedEvaluationMappings, type PersistedEvaluationMappingRow } from "../../lib/evaluation-production";
 import { baselineResultFor, historyKeyToEngineKey, planReassessment, selectBaselineTargets, type ReassessmentPlan } from "../../lib/evaluation-reassessment";
 import type { GoalkeeperEvaluationHistorySession } from "../../lib/evaluation-history";
@@ -45,11 +46,11 @@ export function ReassessmentWizard(props: Props) {
     let active = true;
     async function load() {
       if (!supabase) return;
-      const { data, error } = await supabase.from("exercise_evaluation_targets").select("id,exercise_id,target_type,technical_subcategory_id,physical_objective_id,evaluation_suitability,observability_weight,specificity_weight,evidence_notes,confidence,mapping_status,attivo,target_role,physical_feasibility,tactical_family,complexity,decision_source");
+      const { data, error } = await loadAllEvaluationMappings();
       if (!active) return;
       setLoading(false);
       if (error) { onToast(`Mapping rivalutazione non disponibili: ${error.message}`); return; }
-      setMappingRows((data ?? []) as PersistedEvaluationMappingRow[]);
+      setMappingRows(data);
     }
     void load();
     return () => { active = false; };

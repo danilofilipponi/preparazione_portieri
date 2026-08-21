@@ -446,5 +446,10 @@ test("il caricamento iniziale non apre conferme distruttive", async () => {
     assert.ok(start >= 0 && end > start, `${loader} deve essere presente`);
     assert.doesNotMatch(app.slice(start, end), /window\.confirm/);
   }
-  assert.match(app, /async function deleteTraining[\s\S]*?window\.confirm\("Eliminare definitivamente questa seduta\?"\)/);
+  const deleteStart = app.indexOf("async function deleteTraining");
+  const deleteEnd = app.indexOf("async function saveSeasonConfiguration", deleteStart);
+  const deleteFlow = app.slice(deleteStart, deleteEnd);
+  assert.match(deleteFlow, /window\.confirm/);
+  assert.match(deleteFlow, /Eliminare definitivamente questa seduta\?/);
+  assert.match(deleteFlow, /delete_owned_evaluation_training/);
 });

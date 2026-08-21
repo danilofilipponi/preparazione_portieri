@@ -28,7 +28,8 @@ import { buildGoalkeeperEvaluationHistory, type EvaluationHistoryInput, type Goa
 import { EvaluationPdfExportButton, TrainingPdfExportButton } from "./components/session-pdf-export";
 
 type Section = "archive" | "builder" | "agenda" | "physical" | "goalkeepers" | "evaluation";
-type ExerciseDraft = Omit<Exercise, "id" | "category" | "subcategory" | "physical_mappings">;
+type ExerciseDraft = Omit<Exercise, "id" | "category" | "subcategory" | "physical_mappings" | "evaluation_mappings">;
+type EvaluationEligibilityDraft = { enabled: boolean; evidenceNotes: string; dirty: boolean };
 
 const emptyExercise: ExerciseDraft = {
   codice: "", nome: "", category_id: 1, subcategory_id: 1,
@@ -137,6 +138,7 @@ function normalizeExercise(record: Record<string, unknown>): Exercise {
     category: category ?? undefined,
     subcategory: subcategory ?? undefined,
     physical_mappings: physicalMappings,
+    evaluation_mappings: Array.isArray(record.evaluation_mappings) ? record.evaluation_mappings as Exercise["evaluation_mappings"] : [],
   } as Exercise;
 }
 
@@ -207,7 +209,7 @@ export function KeeperApp() {
 
   const loadExercises = useCallback(async () => {
     if (!supabase) return;
-    let { data, error } = await supabase.from("exercises").select("*, category:exercise_categories(*), subcategory:exercise_subcategories(*), physical_mappings:exercise_physical_objectives(id,exercise_id,physical_objective_id,ruolo,peso,motivazione,attivo,physical_objective:physical_objectives(*))").order("codice");
+    let { data, error } = await supabase.from("exercises").select("*, category:exercise_categories(*), subcategory:exercise_subcategories(*), physical_mappings:exercise_physical_objectives(id,exercise_id,physical_objective_id,ruolo,peso,motivazione,attivo,physical_objective:physical_objectives(*)), evaluation_mappings:exercise_evaluation_targets(id,exercise_id,target_type,technical_subcategory_id,physical_objective_id,evidence_notes,mapping_status,attivo)").order("codice");
     if (error) {
       const legacyResult = await supabase.from("exercises").select("*, category:exercise_categories(*), subcategory:exercise_subcategories(*)").order("codice");
       data = legacyResult.data as typeof data;
@@ -639,15 +641,22 @@ export function KeeperApp() {
   }
 
   async function deleteTraining(training: Training) {
-    if (!supabase || !window.confirm("Eliminare definitivamente questa seduta?")) return;
-    const { error } = await supabase.from("trainings").delete().eq("id", training.id);
+    if (!supabase) return;
+    const completedEvaluation = training.evaluation_session?.status === "Completed";
+    const confirmed = window.confirm(completedEvaluation
+      ? "Eliminare definitivamente questa valutazione completata? Verranno rimossi anche risultati e osservazioni. L’operazione non può essere annullata."
+      : "Eliminare definitivamente questa seduta?");
+    if (!confirmed) return;
+    const { error } = completedEvaluation
+      ? await supabase.rpc("delete_owned_evaluation_training", { requested_session_id: training.evaluation_session!.id })
+      : await supabase.from("trainings").delete().eq("id", training.id);
     if (error) {
       setToast(`Seduta non eliminata: ${error.message}`);
       return;
     }
     setOpenTraining(null);
-    await loadTrainings();
-    setToast("Seduta eliminata dall’agenda");
+    await Promise.all([loadTrainings(), loadEvaluationHistory()]);
+    setToast(completedEvaluation ? "Valutazione eliminata definitivamente" : "Seduta eliminata dall’agenda");
   }
 
   async function saveSeasonConfiguration(configuration: SeasonConfiguration) {
@@ -741,7 +750,7 @@ export function KeeperApp() {
     setToast("Eccezione rimossa");
   }
 
-  async function saveExercise(draft: ExerciseDraft, newPhysicalMappings: PhysicalMappingDraft[] = []) {
+  async function saveExercise(draft: ExerciseDraft, newPhysicalMappings: PhysicalMappingDraft[] = [], evaluationEligibility?: EvaluationEligibilityDraft) {
     if (!supabase) return;
     const existing = editingExercise !== "new" ? editingExercise : null;
     const selectedCategory = exerciseCategories.find(item => item.id === draft.category_id);
@@ -755,11 +764,20 @@ export function KeeperApp() {
       setToast(`Esercizio non salvato: ${result.error.message}`);
       return;
     }
-    if (!existing && result.data && newPhysicalMappings.length) {
-      const exerciseId = String((result.data as { id: string }).id);
+    const savedExerciseId = existing?.id ?? (result.data ? String((result.data as { id: string }).id) : null);
+    if (savedExerciseId && evaluationEligibility && ((!existing && evaluationEligibility.enabled) || (existing && evaluationEligibility.dirty))) {
+      const { error } = await supabase.rpc("set_exercise_evaluation_eligibility", {
+        requested_exercise_id: savedExerciseId,
+        requested_technical_subcategory_id: selectedSubcategory.id,
+        requested_enabled: evaluationEligibility.enabled,
+        requested_evidence_notes: evaluationEligibility.evidenceNotes.trim() || `Osservare ${cleanSubcategoryLabel(selectedSubcategory.nome)} durante l’esecuzione dell’esercizio.`,
+      });
+      if (error) { await loadExercises(); setEditingExercise(null); setToast(`Esercizio creato, ma non aggiunto alle valutazioni: ${error.message}`); return; }
+    }
+    if (!existing && savedExerciseId && newPhysicalMappings.length) {
       for (const mapping of newPhysicalMappings) {
         const { error } = await supabase.rpc("set_exercise_physical_objective", {
-          requested_exercise_id: exerciseId,
+          requested_exercise_id: savedExerciseId,
           requested_physical_objective_id: mapping.physical_objective_id,
           requested_role: mapping.ruolo,
           requested_weight: mapping.peso,
@@ -912,7 +930,7 @@ export function KeeperApp() {
           {!loading && section === "goalkeepers" && <GoalkeepersPage goalkeepers={goalkeepers} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} evaluationHistory={evaluationHistory} onOpenEvaluationResults={setHistoryEvaluationSessionId} onCreateEvaluation={() => { setReassessmentBaselineId(null); setSection("evaluation"); }} onReassess={sessionId => { setReassessmentBaselineId(sessionId); setSection("evaluation"); }} onSaveGoalkeeper={saveGoalkeeper} onDeactivate={deactivateGoalkeeper} onSaveAssessment={saveGoalkeeperAssessment} />}
           {!loading && section === "evaluation" && (reassessmentBaselineId && evaluationHistory.find(item => item.id === reassessmentBaselineId)
             ? <ReassessmentWizard baseline={evaluationHistory.find(item => item.id === reassessmentBaselineId)!} exercises={exercises} subcategories={exerciseSubcategories} physicalObjectives={physicalObjectives} goalkeepers={goalkeepers} onCancel={() => { setReassessmentBaselineId(null); setSection("goalkeepers"); }} onCreated={async () => { await Promise.all([loadTrainings(), loadEvaluationHistory()]); setReassessmentBaselineId(null); setSection("agenda"); }} onToast={setToast} />
-            : <EvaluationSessionWizard exercises={exercises} subcategories={exerciseSubcategories} physicalObjectives={physicalObjectives} physicalDimensions={physicalAssessmentDimensions} goalkeepers={goalkeepers} catalogAdmin={catalogAdmin} onCreated={async () => { await Promise.all([loadTrainings(), loadEvaluationHistory()]); setSection("agenda"); }} onToast={setToast} />)}
+            : <EvaluationSessionWizard exercises={exercises} subcategories={exerciseSubcategories} physicalObjectives={physicalObjectives} physicalDimensions={physicalAssessmentDimensions} goalkeepers={goalkeepers} catalogAdmin={catalogAdmin} reassessmentBaselines={evaluationHistory} onReassess={setReassessmentBaselineId} onCreated={async () => { await Promise.all([loadTrainings(), loadEvaluationHistory()]); setSection("agenda"); }} onToast={setToast} />)}
           {!loading && section === "builder" && <SessionPlanner editing={Boolean(editingTrainingId)} date={date} duration={duration} keepers={keepers} mode={generationMode} seasonPhase={seasonPhases.find(item=>date>=item.data_inizio&&date<=item.data_fine)?.tipo??"Non specificata"} profile={sessionProfile} goalkeepers={goalkeepers} selectedGoalkeeperIds={selectedGoalkeeperIds} categories={exerciseCategories} physicalDimensions={physicalAssessmentDimensions} technicalRanking={technicalRanking} physicalRanking={physicalRanking} technicalFocusId={technicalFocusId} technicalSecondaryFocusId={technicalSecondaryFocusId} physicalFocusId={physicalFocusId} blocks={sessionBlocks} generatedExercises={generatedExercises} quality={sessionQuality} confirmed={sessionConfirmed} onDate={value => { setDate(value); setGeneratedExercises(null); }} onDuration={value => { setDuration(value); setSessionProfile(null); setSessionBlocks([]); setGeneratedExercises(null); }} onKeepers={value => { setKeepers(value); setGeneratedExercises(null); }} onMode={setGenerationMode} onGoalkeepers={value => { setSelectedGoalkeeperIds(value); setGeneratedExercises(null); }} onTechnicalFocus={value => { setTechnicalFocusId(value); setGeneratedExercises(null); if (sessionProfile) setSessionBlocks(buildSessionBlocks(sessionProfile, value, physicalFocusId)); }} onTechnicalSecondaryFocus={value => { setTechnicalSecondaryFocusId(value); setGeneratedExercises(null); }} onPhysicalFocus={value => { setPhysicalFocusId(value); setGeneratedExercises(null); if (sessionProfile) setSessionBlocks(buildSessionBlocks(sessionProfile, technicalFocusId, value)); }} onBlocks={value => { setSessionBlocks(value); setGeneratedExercises(null); }} onGenerate={generateSessionPlan} onGenerateExercises={generateExercisePlan} onOpenExercise={(exercise,plannedDuration,variants)=>setSessionExerciseDetail({exercise:exercises.find(item=>item.id===exercise.id)??exercise,plannedDuration,variants})} onToggleLock={toggleExerciseLock} onExerciseDuration={changePlannedDuration} onRemove={removeGeneratedExercise} onReplace={openReplacement} onVariants={openVariants} onMove={moveGeneratedExercise} onRegenerateBlock={regenerateOneBlock} onRegenerateSession={regenerateAllExercises} onRecalculateAll={recalculateWholeSession} onAdd={setManualPickerBlock} onConfirm={()=>setSessionConfirmed(true)} onSave={saveSession} />}
           {!loading && section === "agenda" && (seasonSettingsOpen
             ? <SeasonSettings settings={settings} season={season} phases={seasonPhases} recall={seasonRecall} profiles={seasonProfiles} matches={seasonMatches} exceptions={calendarExceptions} busy={seasonBusy} onClose={() => setSeasonSettingsOpen(false)} onSave={saveSeasonConfiguration} onGenerate={generateSeasonAgenda} onSaveMatch={saveSeasonMatch} onDeleteMatch={deleteSeasonMatch} onSaveException={saveCalendarException} onDeleteException={deleteCalendarException} />
@@ -1031,19 +1049,21 @@ function ExerciseEditorModal({ exercise, categories, subcategories, physicalObje
   subcategories: ExerciseSubcategory[];
   physicalObjectives: PhysicalObjective[];
   onClose: () => void;
-  onSave: (draft: ExerciseDraft, physicalMappings?: PhysicalMappingDraft[]) => Promise<void>;
+  onSave: (draft: ExerciseDraft, physicalMappings?: PhysicalMappingDraft[], evaluationEligibility?: EvaluationEligibilityDraft) => Promise<void>;
   onSavePhysicalMapping: (exercise: Exercise, draft: PhysicalMappingDraft) => Promise<void>;
   onRemovePhysicalMapping: (mapping: ExercisePhysicalObjective) => Promise<void>;
 }) {
   const firstCategory = categories[0];
   const firstSubcategory = subcategories.find(item => item.category_id === firstCategory?.id && item.fase !== "Generale");
   const initial: ExerciseDraft = exercise
-    ? (({ id: _id, category: _category, subcategory: _subcategory, physical_mappings: _physicalMappings, ...rest }) => rest)(exercise)
+    ? (({ id: _id, category: _category, subcategory: _subcategory, physical_mappings: _physicalMappings, evaluation_mappings: _evaluationMappings, ...rest }) => rest)(exercise)
     : { ...emptyExercise, category_id: firstCategory?.id ?? 1, subcategory_id: firstSubcategory?.id ?? 1, categoria: firstCategory?.nome ?? emptyExercise.categoria, sottocategoria: firstSubcategory?.nome ?? emptyExercise.sottocategoria, fase: firstSubcategory?.fase === "Generale" ? "Analitico" : firstSubcategory?.fase ?? "Analitico" };
   const [draft, setDraft] = useState<ExerciseDraft>(initial);
   const [saving, setSaving] = useState(false);
   const [mappingBusyId, setMappingBusyId] = useState<string | null>(null);
   const [newPhysicalMappings, setNewPhysicalMappings] = useState<PhysicalMappingDraft[]>([]);
+  const activeTechnicalEvaluationMapping = exercise?.evaluation_mappings?.find(mapping => mapping.target_type === "Technical" && mapping.attivo && mapping.mapping_status === "auto_approved");
+  const [evaluationEligibility, setEvaluationEligibility] = useState<EvaluationEligibilityDraft>({ enabled: Boolean(activeTechnicalEvaluationMapping), evidenceNotes: activeTechnicalEvaluationMapping?.evidence_notes ?? "", dirty: false });
   const [diagramEditor, setDiagramEditor] = useState<{ diagram: TacticalDiagram; origin: "automatic" | "edit" } | null>(null);
   const validSubcategories = subcategories.filter(item => item.category_id === draft.category_id && item.fase === draft.fase);
   const set = <K extends keyof ExerciseDraft>(key: K, value: ExerciseDraft[K]) => setDraft(current => ({ ...current, [key]: value }));
@@ -1068,7 +1088,7 @@ function ExerciseEditorModal({ exercise, categories, subcategories, physicalObje
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setSaving(true);
-    await onSave(draft, exercise ? undefined : newPhysicalMappings);
+    await onSave(draft, exercise ? undefined : newPhysicalMappings, evaluationEligibility);
     setSaving(false);
   }
   async function savePhysicalMapping(mappingDraft: PhysicalMappingDraft) {
@@ -1132,6 +1152,7 @@ function ExerciseEditorModal({ exercise, categories, subcategories, physicalObje
       </section>
       {diagramEditor && <div className="field full"><TacticalDiagramEditor exercise={exerciseForDiagram()} value={diagramEditor.diagram} onCancel={() => setDiagramEditor(null)} onSave={diagram => { const automatic = diagramEditor.origin === "automatic"; setDraft(current => ({ ...current, tactical_diagram: diagram, diagram_source: automatic ? "automatic" : current.diagram_source === "automatic" ? "automatic_edited" : "manual", diagram_updated_at: new Date().toISOString() })); setDiagramEditor(null); }} /></div>}
       {!exercise && <NewExercisePhysicalObjectivesEditor mappings={newPhysicalMappings} objectives={physicalObjectives} onChange={setNewPhysicalMappings} />}
+      <section className={`field full evaluation-eligibility-field ${evaluationEligibility.enabled ? "enabled" : ""}`}><div><span className="eyebrow">Valutazione portiere</span><h3>Disponibilità nelle sedute di valutazione</h3><p>Se attivato, l’esercizio potrà essere scelto dal generatore e dalla modalità Personalizzata.</p></div><label className="evaluation-eligibility-toggle"><input type="checkbox" checked={evaluationEligibility.enabled} onChange={event => setEvaluationEligibility(current => ({ ...current, enabled: event.target.checked, dirty: true }))}/><span><b>Usa questo esercizio nelle valutazioni</b><small>Parametro tecnico: {cleanSubcategoryLabel(draft.sottocategoria)}</small></span></label>{evaluationEligibility.enabled && <label className="evaluation-evidence-field"><span>Cosa osservare</span><textarea rows={2} value={evaluationEligibility.evidenceNotes} onChange={event => setEvaluationEligibility(current => ({ ...current, evidenceNotes: event.target.value, dirty: true }))} placeholder={`Esempio: osservare ${cleanSubcategoryLabel(draft.sottocategoria).toLocaleLowerCase("it")} e qualità del gesto tecnico.`}/><small>Facoltativo: se vuoto verrà inserita una descrizione automatica.</small></label>}{exercise && !evaluationEligibility.dirty && <small className="evaluation-eligibility-status">Stato attuale caricato dal catalogo. Verrà modificato solo se cambi la spunta o il testo.</small>}</section>
       <div className="field full checkbox-field"><label><input type="checkbox" checked={draft.attivo} onChange={event => set("attivo", event.target.checked)} /> Esercizio attivo</label></div>
     </div>
     <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Annulla</button><button className="primary" disabled={saving}>{saving ? "Salvataggio…" : "Salva esercizio"}</button></div>

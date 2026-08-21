@@ -97,3 +97,30 @@ test("migration Personalizzata riusa la RPC protetta senza alterare RLS", () => 
   assert.match(sql, /grant execute on function public\.create_custom_evaluation_training[\s\S]*to authenticated/i);
   assert.doesNotMatch(sql, /create policy|alter policy|disable row level security/i);
 });
+
+test("un nuovo esercizio puo essere abilitato esplicitamente per le valutazioni", () => {
+  const sql = readFileSync(new URL("../supabase/migrations/0038_new_exercise_evaluation_eligibility.sql", import.meta.url), "utf8");
+  const app = readFileSync(new URL("../app/keeper-app.tsx", import.meta.url), "utf8");
+  assert.match(app, /Usa questo esercizio nelle valutazioni/);
+  assert.match(app, /set_exercise_evaluation_eligibility/);
+  assert.match(sql, /if not public\.is_catalog_admin\(\)/i);
+  assert.match(sql, /target_type[\s\S]*'Technical'/i);
+  assert.match(sql, /mapping_status[\s\S]*'auto_approved'/i);
+  assert.match(sql, /decision_source[\s\S]*'manual'/i);
+  assert.match(sql, /on conflict \(exercise_id, technical_subcategory_id\)/i);
+  assert.match(sql, /revoke all on function public\.set_exercise_evaluation_eligibility[\s\S]*from public, anon/i);
+  assert.doesNotMatch(sql, /create policy|alter policy|disable row level security/i);
+});
+
+test("un esercizio esistente carica e aggiorna lo stato valutativo senza scritture implicite", () => {
+  const sql = readFileSync(new URL("../supabase/migrations/0039_existing_exercise_evaluation_eligibility.sql", import.meta.url), "utf8");
+  const app = readFileSync(new URL("../app/keeper-app.tsx", import.meta.url), "utf8");
+  assert.match(app, /evaluation_mappings:exercise_evaluation_targets/);
+  assert.match(app, /activeTechnicalEvaluationMapping/);
+  assert.match(app, /existing && evaluationEligibility\.dirty/);
+  assert.match(app, /dirty: true/);
+  assert.match(sql, /update public\.exercise_evaluation_targets[\s\S]*target_type = 'Technical'/i);
+  assert.match(sql, /not requested_enabled[\s\S]*technical_subcategory_id <> requested_technical_subcategory_id/i);
+  assert.match(sql, /if not public\.is_catalog_admin\(\)/i);
+  assert.doesNotMatch(sql, /create policy|alter policy|disable row level security/i);
+});

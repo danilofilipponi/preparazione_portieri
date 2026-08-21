@@ -151,3 +151,11 @@ test("Field UI riposiziona la seduta all'inizio quando cambia esercizio", () => 
   assert.match(source, /\}, \[index, isMobile\]\);/);
   assert.match(source, /ref=\{overlayRef\}/);
 });
+
+test("Field UI mostra frecce e chiusura reali senza escape Unicode visibili", () => {
+  const source = readFileSync(new URL("../app/components/evaluation-field-mode.tsx", import.meta.url), "utf8");
+  assert.match(source, />←<\/span> Precedente/);
+  assert.match(source, /Esercizio successivo <span aria-hidden="true">→<\/span>/);
+  assert.match(source, /aria-label="Chiudi e continua[^>]*>×<\/button>/);
+  assert.doesNotMatch(source, />\\u(?:2190|2192|00d7)/i);
+});

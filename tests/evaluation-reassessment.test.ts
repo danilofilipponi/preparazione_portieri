@@ -112,3 +112,14 @@ test("reassessment RPC is authenticated-only and reuses production creation", ()
   assert.match(sql, /revoke all on function public\.create_reassessment_training[\s\S]*from public, anon/i);
   assert.match(sql, /grant execute on function public\.create_reassessment_training[\s\S]*to authenticated/i);
 });
+
+test("completed evaluation deletion is explicit, owner scoped and preserves used baselines", () => {
+  const sql = readFileSync(new URL("../supabase/migrations/0037_controlled_completed_evaluation_deletion.sql", import.meta.url), "utf8");
+  assert.match(sql, /current_owner uuid := auth\.uid\(\)/i);
+  assert.match(sql, /id = requested_session_id[\s\S]*owner_id = current_owner/i);
+  assert.match(sql, /previous_evaluation_session_id = target_session\.id/i);
+  assert.match(sql, /controlled_evaluation_delete/i);
+  assert.match(sql, /delete from public\.trainings[\s\S]*owner_id = current_owner/i);
+  assert.match(sql, /revoke all on function public\.delete_owned_evaluation_training\(uuid\)[\s\S]*from public, anon/i);
+  assert.match(sql, /grant execute on function public\.delete_owned_evaluation_training\(uuid\)[\s\S]*to authenticated/i);
+});
