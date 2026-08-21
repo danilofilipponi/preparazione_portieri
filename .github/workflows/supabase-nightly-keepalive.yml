@@ -29,6 +29,7 @@ jobs:
           set -euo pipefail
 
           SUPABASE_URL="${SUPABASE_URL%/}"
+          SUPABASE_URL="${SUPABASE_URL%/rest/v1}"
           AUTH_RESPONSE="$(
             curl --silent --show-error --fail-with-body \
               --request POST \
