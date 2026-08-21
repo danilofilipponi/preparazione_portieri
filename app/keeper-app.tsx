@@ -26,10 +26,26 @@ import { EvaluationFieldMode } from "./components/evaluation-field-mode";
 import { ReassessmentWizard } from "./components/reassessment-wizard";
 import { buildGoalkeeperEvaluationHistory, type EvaluationHistoryInput, type GoalkeeperEvaluationHistorySession } from "../lib/evaluation-history";
 import { EvaluationPdfExportButton, TrainingPdfExportButton } from "./components/session-pdf-export";
+import { getKeeperLabRuntimeConfig, isWordPressRuntime } from "../lib/runtime-config";
 
 type Section = "archive" | "builder" | "agenda" | "physical" | "goalkeepers" | "evaluation";
 type ExerciseDraft = Omit<Exercise, "id" | "category" | "subcategory" | "physical_mappings" | "evaluation_mappings">;
 type EvaluationEligibilityDraft = { enabled: boolean; evidenceNotes: string; dirty: boolean };
+
+const wordpressSectionSlugs: Record<Section, string> = {
+  agenda: "agenda",
+  builder: "allenamento",
+  archive: "catalogo",
+  physical: "obiettivi-fisici",
+  goalkeepers: "portieri",
+  evaluation: "valutazione",
+};
+
+function sectionFromWordPressHash(): Section {
+  if (typeof window === "undefined" || !isWordPressRuntime() || !getKeeperLabRuntimeConfig().hashRouting) return "agenda";
+  const value = window.location.hash.replace(/^#\/?/, "").split("/")[0].toLowerCase();
+  return (Object.entries(wordpressSectionSlugs).find(([, slug]) => slug === value)?.[0] as Section | undefined) ?? "agenda";
+}
 
 const emptyExercise: ExerciseDraft = {
   codice: "", nome: "", category_id: 1, subcategory_id: 1,
@@ -143,7 +159,7 @@ function normalizeExercise(record: Record<string, unknown>): Exercise {
 }
 
 export function KeeperApp() {
-  const [section, setSection] = useState<Section>("agenda");
+  const [section, setSection] = useState<Section>(sectionFromWordPressHash);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [exerciseCategories, setExerciseCategories] = useState<ExerciseCategory[]>([]);
   const [exerciseSubcategories, setExerciseSubcategories] = useState<ExerciseSubcategory[]>([]);
@@ -206,6 +222,19 @@ export function KeeperApp() {
   const [catalogAdmin, setCatalogAdmin] = useState(false);
   const [seasonSettingsOpen, setSeasonSettingsOpen] = useState(false);
   const [openCalendarDay, setOpenCalendarDay] = useState<CalendarDay | null>(null);
+
+  useEffect(() => {
+    if (!isWordPressRuntime() || !getKeeperLabRuntimeConfig().hashRouting) return;
+    const syncSectionFromHash = () => setSection(sectionFromWordPressHash());
+    window.addEventListener("hashchange", syncSectionFromHash);
+    return () => window.removeEventListener("hashchange", syncSectionFromHash);
+  }, []);
+
+  useEffect(() => {
+    if (!isWordPressRuntime() || !getKeeperLabRuntimeConfig().hashRouting) return;
+    const nextHash = `#/${wordpressSectionSlugs[section]}`;
+    if (window.location.hash !== nextHash) window.history.replaceState(null, "", nextHash);
+  }, [section]);
 
   const loadExercises = useCallback(async () => {
     if (!supabase) return;
@@ -1192,12 +1221,12 @@ function PlannerTrainingModal({ training, catalog, goalkeepers, categories, phys
   if (training.evaluation_session) {
     const evaluatedGoalkeeper = goalkeepers.find(item => item.id === training.evaluation_session?.goalkeeper_id);
     const evaluationAction = training.evaluation_session.status === "Completed" ? "Vedi risultati" : training.evaluation_session.status === "InProgress" ? "Continua valutazione" : "Avvia valutazione";
-    return <><div className="modal-backdrop" onClick={onClose}><div className="modal training-detail-modal rich-training-modal evaluation-training-modal" onClick={event => event.stopPropagation()}><button className="training-modal-close" onClick={onClose} aria-label="Chiudi finestra" title="Chiudi">×</button>
+    return <><div className="modal-backdrop training-session-backdrop" onClick={onClose}><div className="modal training-detail-modal rich-training-modal evaluation-training-modal" onClick={event => event.stopPropagation()}><button className="training-modal-close" onClick={onClose} aria-label="Chiudi finestra" title="Chiudi">×</button>
       <div className="evaluation-training-heading"><div><span className="evaluation-badge">VALUTAZIONE</span><span className="evaluation-type-badge">{training.evaluation_session.evaluation_type === "Complete" ? "Completa" : training.evaluation_session.evaluation_type === "Targeted" ? "Mirata" : training.evaluation_session.evaluation_type === "Custom" ? "Personalizzata" : "Rivalutazione"}</span><h2>{new Date(`${training.training_date}T12:00:00`).toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</h2><p>{training.planned_duration_minutes} minuti · {displayItems.length} esercizi · Stato {training.evaluation_session.status}</p></div><div className="evaluation-goalkeeper-panel"><small>Portiere valutato</small><strong>{evaluatedGoalkeeper ? `${evaluatedGoalkeeper.nome} ${evaluatedGoalkeeper.cognome}` : "Portiere"}</strong><span>Minimo {training.evaluation_session.minimum_observations} osservazioni</span></div></div>
       <div className="evaluation-saved-exercises">{displayItems.map((item,index)=><SessionExerciseCard key={item.id} item={item} number={index+1} goalkeeperName={goalkeeperName} onOpen={()=>onOpenExercise(item.exercise,item.plannedDuration,item.variants)}/>)}</div>
       <div className="training-modal-footer"><button className="primary evaluation-launch-button" onClick={()=>setEvaluationMode(training.evaluation_session?.status === "Completed" ? "results" : "field")}>{evaluationAction}</button><EvaluationPdfExportButton sessionId={training.evaluation_session.id}/><button className="training-icon-action delete" onClick={onDelete} aria-label="Elimina seduta" title="Elimina seduta">🗑</button></div></div></div>{evaluationMode&&<EvaluationFieldMode sessionId={training.evaluation_session.id} initialMode={evaluationMode} onSessionChanged={onSessionChanged} onClose={()=>{setEvaluationMode(null);onClose();}}/>}</>;
   }
-  return <><div className="modal-backdrop" onClick={onClose}><div className="modal training-detail-modal rich-training-modal" onClick={event => event.stopPropagation()}><button className="training-modal-close" onClick={onClose} aria-label="Chiudi finestra" title="Chiudi">×</button>
+  return <><div className="modal-backdrop training-session-backdrop" onClick={onClose}><div className="modal training-detail-modal rich-training-modal" onClick={event => event.stopPropagation()}><button className="training-modal-close" onClick={onClose} aria-label="Chiudi finestra" title="Chiudi">×</button>
     <SessionOverviewHeader date={training.training_date} matchDay={training.session_profile_code||(training.match_day_offset!==null&&training.match_day_offset!==undefined?`MD${training.match_day_offset}`:"MD")} seasonPhase={phase?.tipo??"Non specificata"} duration={training.planned_duration_minutes} load={training.planned_load||((training.session_profile_snapshot as SessionProfile|undefined)?.load)||"Non specificato"} goalkeeperCount={training.goalkeeper_count} technicalPrimary={technicalPrimary} technicalSecondary={technicalSecondary} physicalPrimary={physicalPrimary} goalkeeperNames={selectedGoalkeepers.map(item=>`${item.nome} ${item.cognome}`)} quality={quality} onFieldMode={()=>setFieldMode(true)}/>
     <div className="saved-session-blocks">{blocks.map((block,index)=>{const items=groupSessionExercises(displayItems,block.ordine);const isOpen=expanded[block.ordine]??true;const blockTechnical=categories.find(item=>item.id===block.technical_category_id)?.nome;const blockPhysical=physicalDimensions.find(item=>item.id===block.physical_dimension_id)?.nome;return <article className={`generated-block rich-block ${isOpen?"open":"collapsed"}`} key={block.ordine}><header><button className="block-collapse" onClick={()=>setExpanded(current=>({...current,[block.ordine]:!isOpen}))} aria-expanded={isOpen} aria-label={`${isOpen?"Comprimi":"Espandi"} blocco ${String.fromCharCode(65+index)}`}><b>{String.fromCharCode(65+index)}</b><span>{isOpen?"⌃":"⌄"}</span></button><div className="rich-block-heading"><strong>{block.tipo_blocco}</strong><small>{block.durata_target} min · {items.length} {items.length===1?"esercizio":"esercizi"}</small></div><div className="rich-block-targets"><span>{block.fase_metodologica_preferita||"Fase libera"}</span><span>Carico {block.carico_target||"libero"}</span>{blockTechnical&&<span>Focus {blockTechnical}</span>}{blockPhysical&&<span>Fisico {blockPhysical}</span>}</div></header>{isOpen&&<div className="rich-block-body">{items.length?items.map(item=><SessionExerciseCard key={item.id} item={item} number={displayItems.findIndex(candidate=>candidate.id===item.id)+1} goalkeeperName={goalkeeperName} onOpen={()=>onOpenExercise(item.exercise,item.plannedDuration,item.variants)}/>):<p className="planner-empty">Nessun esercizio salvato in questo blocco.</p>}</div>}</article>})}</div>
     <div className="training-modal-footer"><TrainingPdfExportButton data={{title:training.notes?.trim()||`Seduta ${technicalPrimary}`,date:training.training_date,duration:training.planned_duration_minutes,goalkeeperNames:selectedGoalkeepers.map(item=>`${item.nome} ${item.cognome}`),goalkeeperCount:training.goalkeeper_count,phase:phase?.tipo??"Non specificata",technicalObjectives:[technicalPrimary,technicalSecondary,...training.training_objectives.map(item=>item.objective)].filter((item):item is string=>Boolean(item)),physicalObjectives:[physicalPrimary],exercises:displayItems}}/><button className="training-icon-action edit" onClick={onEdit} aria-label="Modifica seduta" title="Modifica seduta">✎</button><button className="training-icon-action delete" onClick={onDelete} aria-label="Elimina seduta" title="Elimina seduta">🗑</button></div></div></div>{fieldMode&&<SessionFieldMode items={displayItems} blocks={blocks} goalkeeperName={goalkeeperName} onClose={()=>setFieldMode(false)}/>}</>;

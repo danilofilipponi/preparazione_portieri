@@ -40,6 +40,8 @@ yarn-error.log*
 .vercel
 
 /dist/
+/build-wordpress/
+/dist-wordpress/
 /.wrangler/
 /outputs/
 /work/
