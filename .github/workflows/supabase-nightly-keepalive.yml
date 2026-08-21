@@ -1,0 +1,50 @@
+name: Supabase nightly activity
+
+on:
+  schedule:
+    # 03:17 UTC: 04:17 in inverno e 05:17 in estate in Italia.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-nightly-activity
+  cancel-in-progress: false
+
+jobs:
+  authenticated-read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Esegui tre letture minime autenticate
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_KEEPALIVE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_KEEPALIVE_ANON_KEY }}
+          SUPABASE_EMAIL: ${{ secrets.SUPABASE_KEEPALIVE_EMAIL }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_KEEPALIVE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SUPABASE_URL="${SUPABASE_URL%/}"
+          AUTH_RESPONSE="$(
+            curl --silent --show-error --fail-with-body \
+              --request POST \
+              "${SUPABASE_URL}/auth/v1/token?grant_type=password" \
+              --header "apikey: ${SUPABASE_ANON_KEY}" \
+              --header "Content-Type: application/json" \
+              --data "$(jq -nc --arg email "$SUPABASE_EMAIL" --arg password "$SUPABASE_PASSWORD" '{email:$email,password:$password}')"
+          )"
+          ACCESS_TOKEN="$(jq -er '.access_token' <<<"$AUTH_RESPONSE")"
+
+          for table in exercise_categories physical_objectives exercises; do
+            curl --silent --show-error --fail-with-body \
+              --output /dev/null \
+              "${SUPABASE_URL}/rest/v1/${table}?select=id&limit=1" \
+              --header "apikey: ${SUPABASE_ANON_KEY}" \
+              --header "Authorization: Bearer ${ACCESS_TOKEN}"
+          done
+
+          echo "Tre letture autenticate completate correttamente."
